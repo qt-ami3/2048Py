@@ -31,38 +31,36 @@ playingGrid = np.array([
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 
+def newNum(grid):
+    empty = list(zip(*np.where(grid == 0)))
+    if empty:
+        r, c = rand.choice(empty)
+        grid[r][c] = 2
+
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
+        if event.type == pygame.KEYDOWN:
+            match event.key:
+                case pygame.K_UP | pygame.K_DOWN | pygame.K_LEFT | pygame.K_RIGHT:
+                    newNum(playingGrid)
+
     screen.fill("#4c566a")
 
-    for row in range(rows):
-        for col in range(cols):
-            x = start_x + col * square_size
-            y = start_y + row * square_size
+    for r in range(rows):
+        for c in range(cols):
+            x = start_x + c * square_size
+            y = start_y + r * square_size
 
-            pygame.draw.rect(
-                screen,
-                "#d8dee9",
-                (x, y, square_size, square_size),
-                2
-            )
+            pygame.draw.rect(screen, "#d8dee9", (x, y, square_size, square_size), 2)
 
-            #print value
-            value = playingGrid[row][col]
-            
+            value = playingGrid[r][c]
             if value:
-                text_surface = font.render(str(value), True, "#eceff4")
-
-                text_rect = text_surface.get_rect(
-                    center=(x + square_size // 2, y + square_size // 2)
-                )
-                screen.blit(text_surface, text_rect)
+                text = font.render(str(value), True, "#eceff4")
+                rect = text.get_rect(center=(x + square_size//2, y + square_size//2))
+                screen.blit(text, rect)
 
     pygame.display.flip()
     clock.tick(60)
-
-pygame.quit()
-
