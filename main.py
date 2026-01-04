@@ -1,7 +1,7 @@
-
 import pygame
 import random as rand
 import numpy as np
+import functions as func
 
 # pygame setup
 pygame.init()
@@ -31,12 +31,6 @@ playingGrid = np.array([
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 
-def newNum(grid):
-    empty = list(zip(*np.where(grid == 0)))
-    if empty:
-        r, c = rand.choice(empty)
-        grid[r][c] = 2
-
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -44,8 +38,22 @@ while running:
 
         if event.type == pygame.KEYDOWN:
             match event.key:
-                case pygame.K_UP | pygame.K_DOWN | pygame.K_LEFT | pygame.K_RIGHT:
-                    newNum(playingGrid)
+                case pygame.K_UP:
+                    while True:
+                        func.newNum(playingGrid)
+                        break
+                case pygame.K_DOWN:
+                    while True:
+                        func.newNum(playingGrid)
+                        break
+                case pygame.K_LEFT:
+                    while True:
+                        func.newNum(playingGrid)
+                        break
+                case pygame.K_RIGHT:
+                    while True:
+                        func.moveRight(playingGrid, rows, cols)
+                        break
 
     screen.fill("#4c566a")
 
