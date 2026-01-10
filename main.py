@@ -21,17 +21,13 @@ grid_height = rows * square_size
 start_x = (screen.get_width() - grid_width) // 2
 start_y = (screen.get_height() - grid_height) // 2
 
-playingGrid = np.array([
-    [0, 0, 0, 0],
-    [0, 0, 0, 0],
-    [0, 0, 0, 0],
-    [0, 0, 0, 0]
-])
+playingGrid = np.zeros((rows, cols), dtype=int)
 
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 
 while running:
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -39,25 +35,21 @@ while running:
         if event.type == pygame.KEYDOWN:
             match event.key:
                 case pygame.K_UP:
-                    while True:
-                        func.newNum(playingGrid)
-                        break
+                    func.moveUp(playingGrid, rows, cols)
+                    func.newNum(playingGrid)
                 case pygame.K_DOWN:
-                    while True:
-                        func.newNum(playingGrid)
-                        break
+                    func.moveDown(playingGrid, rows, cols)
+                    func.newNum(playingGrid)
                 case pygame.K_LEFT:
-                    while True:
-                        func.newNum(playingGrid)
-                        break
+                    func.moveLeft(playingGrid, rows, cols)
+                    func.newNum(playingGrid)
                 case pygame.K_RIGHT:
-                    while True:
-                        func.moveRight(playingGrid, rows, cols)
-                        break
+                    func.moveRight(playingGrid, rows, cols)
+                    func.newNum(playingGrid)
 
     screen.fill("#4c566a")
 
-    for r in range(rows):
+    for r in range(rows): #rending logic
         for c in range(cols):
             x = start_x + c * square_size
             y = start_y + r * square_size
