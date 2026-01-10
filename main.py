@@ -9,7 +9,9 @@ screen = pygame.display.set_mode((1200, 1200))
 clock = pygame.time.Clock()
 running = True
 
-font = pygame.font.SysFont("fonts/MapleMono-NF-Base.ttf", 48)
+pygame.font.init()
+font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 29)
+# or font = pygame.font.Font("fonts/mapleMono.ttf", 29)
 
 #grid config
 square_size = 100
@@ -26,6 +28,8 @@ playingGrid = np.zeros((rows, cols), dtype=int)
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 
+playingGridLast = 0
+
 while running:
 
     for event in pygame.event.get():
@@ -34,18 +38,34 @@ while running:
 
         if event.type == pygame.KEYDOWN:
             match event.key:
-                case pygame.K_UP:
+                case pygame.K_UP: 
                     func.moveUp(playingGrid, rows, cols)
-                    func.newNum(playingGrid)
+                    if not np.array_equal(playingGrid, playingGridLast):
+                        func.newNum(playingGrid)
+                        print()
+                        print(sum(sum(playingGrid)))
+                    playingGridLast = playingGrid.copy()
                 case pygame.K_DOWN:
                     func.moveDown(playingGrid, rows, cols)
-                    func.newNum(playingGrid)
+                    if not np.array_equal(playingGrid, playingGridLast):
+                        func.newNum(playingGrid)
+                        print()
+                        print(sum(sum(playingGrid)))
+                    playingGridLast = playingGrid.copy()
                 case pygame.K_LEFT:
                     func.moveLeft(playingGrid, rows, cols)
-                    func.newNum(playingGrid)
+                    if not np.array_equal(playingGrid, playingGridLast):
+                        func.newNum(playingGrid)
+                        print()
+                        print(sum(sum(playingGrid)))
+                    playingGridLast = playingGrid.copy()
                 case pygame.K_RIGHT:
                     func.moveRight(playingGrid, rows, cols)
-                    func.newNum(playingGrid)
+                    if not np.array_equal(playingGrid, playingGridLast):
+                        func.newNum(playingGrid)
+                        print()
+                        print(sum(sum(playingGrid)))
+                    playingGridLast = playingGrid.copy()
 
     screen.fill("#4c566a")
 
@@ -61,6 +81,6 @@ while running:
                 text = font.render(str(value), True, "#eceff4")
                 rect = text.get_rect(center=(x + square_size//2, y + square_size//2))
                 screen.blit(text, rect)
-
+    
     pygame.display.flip()
     clock.tick(60)
