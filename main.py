@@ -19,7 +19,7 @@ WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 800
 
 # Fullscreen state
-is_fullscreen = True
+is_fullscreen = False
 
 # Create display based on initial mode
 if is_fullscreen:
