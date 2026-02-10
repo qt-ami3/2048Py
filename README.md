@@ -5,6 +5,7 @@
 ![bomb example 1/3](images/sampleThree.png)
 ![bomb example 2/3](images/sampleFour.png)
 ![bomb example 3/3](images/sampleFive.png)
+![second shader using moderngl](images/sampleSix.png)
 
 ## run:
 
