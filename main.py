@@ -19,7 +19,7 @@ WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 800
 
 # Fullscreen state
-is_fullscreen = False
+is_fullscreen = True
 
 # Create display based on initial mode
 if is_fullscreen:
@@ -41,6 +41,7 @@ running = True
 
 pygame.font.init()
 font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 29)
+small_font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 20)
 # or font = pygame.font.Font("fonts/mapleMono.ttf", 29)
 
 # Grid config
@@ -62,6 +63,26 @@ playingGridLast = playingGrid.copy()
 
 # Score tracking - start with initial tiles
 points = sum(sum(playingGrid))
+
+# Ability system
+bomb_ability_cost = 750
+bomb_ability_active = False
+next_tile_is_bomb = False
+selecting_bomb_position = False  # True when player needs to select where to place bomb
+hovered_tile = None  # (r, c) of tile being hovered over
+bomb_image = None
+try:
+    bomb_image = pygame.image.load("assets/sprites/bomb.png")
+    bomb_image = pygame.transform.scale(bomb_image, (80, 80))
+except:
+    print("Warning: Could not load bomb.png")
+
+# Menu configuration
+menu_height = 150
+menu_y = start_y + grid_height + 30
+button_width = 200
+button_height = 60
+button_x = start_x + (grid_width - button_width) // 2
 
 # Animation variables
 animating = False
@@ -86,6 +107,7 @@ COLORS = {
     512: "#8fbcbb",
     1024: "#5e81ac",
     2048: "#bf616a",
+    -1: "#bf616a",  # Bomb tile color
 }
 
 # CRT effect variables
@@ -131,7 +153,7 @@ def toggle_fullscreen():
 
 def process_move(direction):
     global playingGrid, playingGridLast, animating, moving_tiles, merging_tiles
-    global animation_progress, new_tile_pos, new_tile_scale, points
+    global animation_progress, new_tile_pos, new_tile_scale, points, next_tile_is_bomb
     
     if animating:
         return
@@ -163,13 +185,15 @@ def process_move(direction):
         moving_tiles = [(sr, sc, er, ec, val, 0) for sr, sc, er, ec, val in moves]
         merging_tiles = [(r, c, val, 1.0) for r, c, val in merges]
         
-        # Add new tile and add its value to points
+        # Add new tile (regular only - bombs are placed manually)
         new_pos = func.newNum(playingGrid)
+        
         if new_pos:
             new_tile_pos = new_pos
             new_tile_scale = 0
             r, c = new_pos
-            points_gained += playingGrid[r][c]
+            if playingGrid[r][c] > 0:  # Only add points for regular tiles
+                points_gained += playingGrid[r][c]
         
         points += points_gained
         playingGridLast = playingGrid.copy()
@@ -228,15 +252,113 @@ def draw_tile(r, c, value, scale=1.0, alpha=255):
     pygame.draw.rect(tile_surface, color, (0, 0, scaled_size, scaled_size))
     pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
     
-    # Draw text
-    text = font.render(str(value), True, "#eceff4")
-    text_rect = text.get_rect(center=(scaled_size//2, scaled_size//2))
-    tile_surface.blit(text, text_rect)
+    # Draw bomb or text
+    if value == -1 and bomb_image:
+        # Draw bomb image
+        bomb_scaled = pygame.transform.scale(bomb_image, (int(scaled_size * 0.8), int(scaled_size * 0.8)))
+        bomb_rect = bomb_scaled.get_rect(center=(scaled_size//2, scaled_size//2))
+        tile_surface.blit(bomb_scaled, bomb_rect)
+    elif value != 0:
+        # Draw text
+        text = font.render(str(value), True, "#eceff4")
+        text_rect = text.get_rect(center=(scaled_size//2, scaled_size//2))
+        tile_surface.blit(text, text_rect)
     
     # Blit to render surface
     render_surface.blit(tile_surface, (x + offset, y + offset))
 
-while running:
+def draw_button(x, y, width, height, text, cost, can_afford, active=False):
+    """Draw ability button"""
+    # Button background
+    if can_afford and not active:
+        color = "#88c0d0"
+        hover_color = "#81a1c1"
+    elif active:
+        color = "#a3be8c"
+        hover_color = "#a3be8c"
+    else:
+        color = "#4c566a"
+        hover_color = "#4c566a"
+    
+    # Check hover
+    mouse_pos = pygame.mouse.get_pos()
+    # Scale mouse position to render coordinates
+    mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
+    mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
+    
+    is_hover = x <= mouse_x <= x + width and y <= mouse_y <= y + height
+    
+    button_color = hover_color if is_hover else color
+    
+    # Draw button
+    pygame.draw.rect(render_surface, button_color, (x, y, width, height))
+    pygame.draw.rect(render_surface, "#d8dee9", (x, y, width, height), 3)
+    
+    # Draw text
+    if active:
+        button_text = small_font.render("ACTIVE", True, "#eceff4")
+    else:
+        button_text = small_font.render(text, True, "#eceff4")
+    text_rect = button_text.get_rect(center=(x + width//2, y + height//3))
+    render_surface.blit(button_text, text_rect)
+    
+    # Draw cost
+    if not active:
+        cost_color = "#a3be8c" if can_afford else "#bf616a"
+        cost_text = small_font.render(f"Cost: {cost}", True, cost_color)
+        cost_rect = cost_text.get_rect(center=(x + width//2, y + 2*height//3))
+        render_surface.blit(cost_text, cost_rect)
+    
+    return is_hover and can_afford and not active
+
+def handle_button_click(mouse_pos):
+    """Handle button clicks"""
+    global points, next_tile_is_bomb, selecting_bomb_position
+    
+    # Scale mouse position to render coordinates
+    mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
+    mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
+    
+    # Check bomb button
+    if button_x <= mouse_x <= button_x + button_width and menu_y <= mouse_y <= menu_y + button_height:
+        if points >= bomb_ability_cost and not selecting_bomb_position:
+            points -= bomb_ability_cost
+            selecting_bomb_position = True
+            print(f"Bomb ability activated! Click an empty tile to place the bomb. Score: {points}")
+
+def get_tile_from_mouse(mouse_pos):
+    """Convert mouse position to grid coordinates"""
+    mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
+    mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
+    
+    # Check if mouse is within grid bounds
+    if start_x <= mouse_x <= start_x + grid_width and start_y <= mouse_y <= start_y + grid_height:
+        c = int((mouse_x - start_x) // square_size)
+        r = int((mouse_y - start_y) // square_size)
+        
+        # Ensure within bounds
+        if 0 <= r < rows and 0 <= c < cols:
+            return (r, c)
+    
+    return None
+
+def place_bomb_at_tile(r, c):
+    """Place a bomb at the specified tile with animation"""
+    global playingGrid, selecting_bomb_position, animating, new_tile_pos, new_tile_scale, animation_progress
+    
+    if playingGrid[r][c] == 0:  # Only place on empty tiles
+        playingGrid[r][c] = -1
+        selecting_bomb_position = False
+        
+        # Trigger spawn animation
+        animating = True
+        animation_progress = 0.7  # Start at the new tile animation phase
+        new_tile_pos = (r, c)
+        new_tile_scale = 0
+        
+        print(f"Bomb placed at position ({r}, {c})")
+
+while running: # game logic game loop
     dt = clock.tick(60) / 1000.0  # Delta time in seconds
 
     for event in pygame.event.get():
@@ -254,9 +376,31 @@ while running:
                 case pygame.K_RIGHT:
                     process_move("right")
                 case pygame.K_ESCAPE:
-                    running = False
+                    if selecting_bomb_position:
+                        # Cancel bomb selection
+                        selecting_bomb_position = False
+                        points += bomb_ability_cost  # Refund
+                        print("Bomb placement cancelled. Points refunded.")
+                    else:
+                        running = False
                 case pygame.K_F11:
                     toggle_fullscreen()
+        
+        if event.type == pygame.MOUSEMOTION:
+            if selecting_bomb_position:
+                hovered_tile = get_tile_from_mouse(event.pos)
+        
+        if event.type == pygame.MOUSEBUTTONDOWN and not animating:
+            if event.button == 1:  # Left click
+                if selecting_bomb_position:
+                    # Try to place bomb on clicked tile
+                    tile = get_tile_from_mouse(event.pos)
+                    if tile:
+                        r, c = tile
+                        place_bomb_at_tile(r, c)
+                else:
+                    # Normal button click
+                    handle_button_click(event.pos)
 
     # Update animations
     update_animations(dt)
@@ -273,7 +417,13 @@ while running:
         for c in range(cols):
             x = start_x + c * square_size
             y = start_y + r * square_size
-            pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 2)
+            
+            # Highlight hovered empty tile during bomb selection
+            if selecting_bomb_position and hovered_tile == (r, c) and playingGrid[r][c] == 0:
+                pygame.draw.rect(render_surface, "#a3be8c", (x, y, square_size, square_size))
+                pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 4)
+            else:
+                pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 2)
 
     # Draw static tiles (not moving or merging)
     if not animating:
@@ -312,8 +462,22 @@ while running:
             scale = ease_out_cubic(new_tile_scale)
             draw_tile(r, c, playingGrid[r][c], scale)
     
+    # Draw ability menu
+    if selecting_bomb_position:
+        instruction_text = small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
+        instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y - 30))
+        render_surface.blit(instruction_text, instruction_rect)
+    else:
+        menu_title = font.render("ABILITIES", True, "#eceff4")
+        menu_title_rect = menu_title.get_rect(center=(RENDER_WIDTH//2, menu_y))
+        render_surface.blit(menu_title, menu_title_rect)
+    
+    # Draw bomb button
+    can_afford = points >= bomb_ability_cost
+    draw_button(button_x, menu_y + 30, button_width, button_height, 
+                "Bomb Tile", bomb_ability_cost, can_afford, selecting_bomb_position)
+    
     # Apply CRT effects on render surface
-    # 1. Copy current render surface to crt_surface
     crt_surface.blit(render_surface, (0, 0))
     
     # 2. Add slight glow/bloom effect
