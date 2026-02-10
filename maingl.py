@@ -1,7 +1,11 @@
+#   shaders from libretro/gist-shaders
+
 import pygame
 import random as rand
 import numpy as np
 import functions as func
+import moderngl
+import array
 
 # pygame setup
 pygame.init()
@@ -21,13 +25,16 @@ WINDOW_HEIGHT = 800
 # Fullscreen state
 is_fullscreen = True
 
-# Create display based on initial mode
+# Create display based on initial mode with OpenGL support
 if is_fullscreen:
-    screen = pygame.display.set_mode((NATIVE_WIDTH, NATIVE_HEIGHT), pygame.FULLSCREEN)
+    screen = pygame.display.set_mode((NATIVE_WIDTH, NATIVE_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     display_width, display_height = NATIVE_WIDTH, NATIVE_HEIGHT
 else:
-    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
     display_width, display_height = WINDOW_WIDTH, WINDOW_HEIGHT
+
+# Initialize ModernGL
+ctx = moderngl.create_context()
 
 # Create render surface at lower resolution
 render_surface = pygame.Surface((RENDER_WIDTH, RENDER_HEIGHT))
@@ -42,12 +49,10 @@ running = True
 pygame.font.init()
 font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 29)
 small_font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 20)
-#font = pygame.font.Font("fonts/mapleMono.ttf", 29)
-#small_font = pygame.font.Font("fonts/mapleMono.ttf", 20)
 
 # Grid config
 square_size = 100
-rows, cols = 4, 4
+rows, cols = 5, 5
 
 grid_width = cols * square_size
 grid_height = rows * square_size
@@ -63,15 +68,14 @@ playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGridLast = playingGrid.copy()
 
 # Score tracking - start with initial tiles
-# points = sum(sum(playingGrid))
-points = 750
+points = sum(sum(playingGrid))
 
 # Ability system
 bomb_ability_cost = 750
 bomb_ability_active = False
 next_tile_is_bomb = False
-selecting_bomb_position = False  # True when player needs to select where to place bomb
-hovered_tile = None  # (r, c) of tile being hovered over
+selecting_bomb_position = False
+hovered_tile = None
 bomb_image = None
 try:
     bomb_image = pygame.image.load("assets/sprites/bomb.png")
@@ -89,11 +93,11 @@ button_x = start_x + (grid_width - button_width) // 2
 # Animation variables
 animating = False
 animation_progress = 0
-animation_speed = 0.15  # Controls animation speed (0-1, higher = faster)
-moving_tiles = []  # List of (start_r, start_c, end_r, end_c, value, progress)
-merging_tiles = []  # List of (r, c, value, scale)
-new_tile_pos = None  # Position of newly spawned tile
-new_tile_scale = 0  # Scale for new tile animation
+animation_speed = 0.15
+moving_tiles = []
+merging_tiles = []
+new_tile_pos = None
+new_tile_scale = 0
 
 # Color scheme
 COLORS = {
@@ -109,49 +113,270 @@ COLORS = {
     512: "#8fbcbb",
     1024: "#5e81ac",
     2048: "#bf616a",
-    -1: "#bf616a",  # Bomb tile color
+    -1: "#bf616a",
 }
 
-# CRT effect variables
-crt_surface = pygame.Surface((screen_width, screen_height))
-scanline_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-vignette_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+# CRT Shader parameters
+crt_params = {
+    'hardScan': -15.0,  # Very pronounced scanlines (like arcade CRT)
+    'hardPix': 0.7,  # Sharper pixels
+    'warpX': 0.10,  # More screen curvature
+    'warpY': 0.12,
+    'maskDark': 0.3,  # Much darker mask (was 0.5)
+    'maskLight': 1.8,  # Brighter phosphors (was 1.5)
+    'shadowMask': 0.0,  # VGA-style RGB triads
+    'brightBoost': 0.9,  # Higher brightness to compensate
+    'hardBloomPix': -1.5,
+    'hardBloomScan': -2.0,
+    'bloomAmount': 0.20,  # More bloom/glow
+    'shape': 2.0
+}
 
-# Create scanlines
-for y in range(0, screen_height, 3):
-    pygame.draw.line(scanline_surface, (0, 0, 0, 40), (0, y), (screen_width, y), 1)
+# Setup ModernGL shader
+vertex_shader = '''
+#version 330
 
-# Create vignette effect
-for i in range(255):
-    alpha = int((i / 255) ** 2 * 120)
-    distance_x = int(i * screen_width / 255 / 2)
-    distance_y = int(i * screen_height / 255 / 2)
-    pygame.draw.rect(vignette_surface, (0, 0, 0, alpha), 
-                     (distance_x, distance_y, screen_width - distance_x * 2, screen_height - distance_y * 2), 1)
+in vec2 in_vert;
+in vec2 in_texcoord;
+out vec2 v_texcoord;
+
+void main() {
+    gl_Position = vec4(in_vert, 0.0, 1.0);
+    v_texcoord = in_texcoord;
+}
+'''
+
+fragment_shader = '''
+#version 330
+
+uniform sampler2D Texture;
+uniform vec2 TextureSize;
+uniform vec2 InputSize;
+
+uniform float hardScan;
+uniform float hardPix;
+uniform float warpX;
+uniform float warpY;
+uniform float maskDark;
+uniform float maskLight;
+uniform float shadowMask;
+uniform float brightBoost;
+uniform float hardBloomPix;
+uniform float hardBloomScan;
+uniform float bloomAmount;
+uniform float shape;
+
+in vec2 v_texcoord;
+out vec4 FragColor;
+
+#define SourceSize vec4(TextureSize, 1.0 / TextureSize)
+
+float ToLinear1(float c) {
+    return (c <= 0.04045) ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+vec3 ToLinear(vec3 c) {
+    return vec3(ToLinear1(c.r), ToLinear1(c.g), ToLinear1(c.b));
+}
+
+float ToSrgb1(float c) {
+    return (c < 0.0031308 ? c * 12.92 : 1.055 * pow(c, 0.41666) - 0.055);
+}
+
+vec3 ToSrgb(vec3 c) {
+    return vec3(ToSrgb1(c.r), ToSrgb1(c.g), ToSrgb1(c.b));
+}
+
+vec3 Fetch(vec2 pos, vec2 off) {
+    pos = (floor(pos * SourceSize.xy + off) + vec2(0.5, 0.5)) / SourceSize.xy;
+    return ToLinear(brightBoost * texture(Texture, pos.xy).rgb);
+}
+
+vec2 Dist(vec2 pos) {
+    pos = pos * SourceSize.xy;
+    return -((pos - floor(pos)) - vec2(0.5));
+}
+
+float Gaus(float pos, float scale) {
+    return exp2(scale * pow(abs(pos), shape));
+}
+
+vec3 Horz3(vec2 pos, float off) {
+    vec3 b = Fetch(pos, vec2(-1.0, off));
+    vec3 c = Fetch(pos, vec2(0.0, off));
+    vec3 d = Fetch(pos, vec2(1.0, off));
+    float dst = Dist(pos).x;
+    float scale = hardPix;
+    float wb = Gaus(dst - 1.0, scale);
+    float wc = Gaus(dst + 0.0, scale);
+    float wd = Gaus(dst + 1.0, scale);
+    return (b * wb + c * wc + d * wd) / (wb + wc + wd);
+}
+
+vec3 Horz5(vec2 pos, float off) {
+    vec3 a = Fetch(pos, vec2(-2.0, off));
+    vec3 b = Fetch(pos, vec2(-1.0, off));
+    vec3 c = Fetch(pos, vec2(0.0, off));
+    vec3 d = Fetch(pos, vec2(1.0, off));
+    vec3 e = Fetch(pos, vec2(2.0, off));
+    float dst = Dist(pos).x;
+    float scale = hardPix;
+    float wa = Gaus(dst - 2.0, scale);
+    float wb = Gaus(dst - 1.0, scale);
+    float wc = Gaus(dst + 0.0, scale);
+    float wd = Gaus(dst + 1.0, scale);
+    float we = Gaus(dst + 2.0, scale);
+    return (a * wa + b * wb + c * wc + d * wd + e * we) / (wa + wb + wc + wd + we);
+}
+
+vec3 Horz7(vec2 pos, float off) {
+    vec3 a = Fetch(pos, vec2(-3.0, off));
+    vec3 b = Fetch(pos, vec2(-2.0, off));
+    vec3 c = Fetch(pos, vec2(-1.0, off));
+    vec3 d = Fetch(pos, vec2(0.0, off));
+    vec3 e = Fetch(pos, vec2(1.0, off));
+    vec3 f = Fetch(pos, vec2(2.0, off));
+    vec3 g = Fetch(pos, vec2(3.0, off));
+    float dst = Dist(pos).x;
+    float scale = hardBloomPix;
+    float wa = Gaus(dst - 3.0, scale);
+    float wb = Gaus(dst - 2.0, scale);
+    float wc = Gaus(dst - 1.0, scale);
+    float wd = Gaus(dst + 0.0, scale);
+    float we = Gaus(dst + 1.0, scale);
+    float wf = Gaus(dst + 2.0, scale);
+    float wg = Gaus(dst + 3.0, scale);
+    return (a * wa + b * wb + c * wc + d * wd + e * we + f * wf + g * wg) / (wa + wb + wc + wd + we + wf + wg);
+}
+
+float Scan(vec2 pos, float off) {
+    float dst = Dist(pos).y;
+    return Gaus(dst + off, hardScan);
+}
+
+float BloomScan(vec2 pos, float off) {
+    float dst = Dist(pos).y;
+    return Gaus(dst + off, hardBloomScan);
+}
+
+vec3 Tri(vec2 pos) {
+    vec3 a = Horz3(pos, -1.0);
+    vec3 b = Horz5(pos, 0.0);
+    vec3 c = Horz3(pos, 1.0);
+    float wa = Scan(pos, -1.0);
+    float wb = Scan(pos, 0.0);
+    float wc = Scan(pos, 1.0);
+    return a * wa + b * wb + c * wc;
+}
+
+vec3 Bloom(vec2 pos) {
+    vec3 a = Horz5(pos, -2.0);
+    vec3 b = Horz7(pos, -1.0);
+    vec3 c = Horz7(pos, 0.0);
+    vec3 d = Horz7(pos, 1.0);
+    vec3 e = Horz5(pos, 2.0);
+    float wa = BloomScan(pos, -2.0);
+    float wb = BloomScan(pos, -1.0);
+    float wc = BloomScan(pos, 0.0);
+    float wd = BloomScan(pos, 1.0);
+    float we = BloomScan(pos, 2.0);
+    return a * wa + b * wb + c * wc + d * wd + e * we;
+}
+
+vec2 Warp(vec2 pos) {
+    pos = pos * 2.0 - 1.0;
+    pos *= vec2(1.0 + (pos.y * pos.y) * warpX, 1.0 + (pos.x * pos.x) * warpY);
+    return pos * 0.5 + 0.5;
+}
+
+vec3 Mask(vec2 pos) {
+    vec3 mask = vec3(maskDark, maskDark, maskDark);
+    
+    // Aperture-grille (vertical RGB stripes - like Trinitron)
+    if (shadowMask == 2.0) {
+        pos.x = fract(pos.x * 0.333333333);
+        if (pos.x < 0.333) mask.r = maskLight;
+        else if (pos.x < 0.666) mask.g = maskLight;
+        else mask.b = maskLight;
+    }
+    // Stretched VGA style shadow mask (diagonal RGB pattern)
+    else if (shadowMask == 3.0) {
+        pos.x += pos.y * 3.0;
+        pos.x = fract(pos.x * 0.166666666);
+        if (pos.x < 0.333) mask.r = maskLight;
+        else if (pos.x < 0.666) mask.g = maskLight;
+        else mask.b = maskLight;
+    }
+    // VGA style shadow mask (grid pattern)
+    else if (shadowMask == 4.0) {
+        pos.xy = floor(pos.xy * vec2(1.0, 0.5));
+        pos.x += pos.y * 3.0;
+        pos.x = fract(pos.x * 0.166666666);
+        if (pos.x < 0.333) mask.r = maskLight;
+        else if (pos.x < 0.666) mask.g = maskLight;
+        else mask.b = maskLight;
+    }
+    
+    return mask;
+}
+
+void main() {
+    vec2 pos = Warp(v_texcoord * (TextureSize / InputSize)) * (InputSize / TextureSize);
+    vec3 outColor = Tri(pos);
+    outColor.rgb += Bloom(pos) * bloomAmount;
+    
+    if (shadowMask > 0.0)
+        outColor.rgb *= Mask(gl_FragCoord.xy * 1.000001);
+    
+    FragColor = vec4(ToSrgb(outColor.rgb), 1.0);
+}
+'''
+
+# Create shader program
+prog = ctx.program(vertex_shader=vertex_shader, fragment_shader=fragment_shader)
+
+# Create fullscreen quad
+vertices = np.array([
+    -1.0, -1.0,  0.0, 0.0,
+    1.0, -1.0,  1.0, 0.0,
+    -1.0,  1.0,  0.0, 1.0,
+    1.0,  1.0,  1.0, 1.0,
+], dtype='f4')
+
+vbo = ctx.buffer(vertices.tobytes())
+vao = ctx.simple_vertex_array(prog, vbo, 'in_vert', 'in_texcoord')
+
+# Create texture for pygame surface
+texture = ctx.texture((RENDER_WIDTH, RENDER_HEIGHT), 3)
+texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+
+# Setup framebuffer for rendering
+fbo = ctx.framebuffer(color_attachments=[ctx.texture((display_width, display_height), 4)])
 
 def get_tile_color(value):
     return COLORS.get(value, "#2e3440")
 
 def lerp(start, end, t):
-    """Linear interpolation"""
     return start + (end - start) * t
 
 def ease_out_cubic(t):
-    """Easing function for smooth animation"""
     return 1 - pow(1 - t, 3)
 
 def toggle_fullscreen():
-    """Toggle between fullscreen and windowed mode"""
-    global is_fullscreen, screen, display_width, display_height
+    global is_fullscreen, screen, display_width, display_height, ctx, fbo
     
     is_fullscreen = not is_fullscreen
     
     if is_fullscreen:
-        screen = pygame.display.set_mode((NATIVE_WIDTH, NATIVE_HEIGHT), pygame.FULLSCREEN)
+        screen = pygame.display.set_mode((NATIVE_WIDTH, NATIVE_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
         display_width, display_height = NATIVE_WIDTH, NATIVE_HEIGHT
     else:
-        screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
         display_width, display_height = WINDOW_WIDTH, WINDOW_HEIGHT
+    
+    # Recreate context and framebuffer for new resolution
+    ctx = moderngl.create_context()
+    fbo = ctx.framebuffer(color_attachments=[ctx.texture((display_width, display_height), 4)])
 
 def process_move(direction):
     global playingGrid, playingGridLast, animating, moving_tiles, merging_tiles
@@ -160,10 +385,8 @@ def process_move(direction):
     if animating:
         return
     
-    # Store grid before move
     grid_before = playingGrid.copy()
     
-    # Execute move and get animation data
     if direction == "up":
         moves, merges = func.moveUp(playingGrid, rows, cols)
     elif direction == "down":
@@ -173,28 +396,24 @@ def process_move(direction):
     elif direction == "right":
         moves, merges = func.moveRight(playingGrid, rows, cols)
     
-    # Check if grid actually changed
     if np.array_equal(grid_before, playingGrid):
         return
     
-    # Calculate points from merges (each merge adds the value of the new tile created)
     points_gained = sum(value for _, _, value in merges)
     
-    # Setup animations
     if moves or merges:
         animating = True
         animation_progress = 0
         moving_tiles = [(sr, sc, er, ec, val, 0) for sr, sc, er, ec, val in moves]
         merging_tiles = [(r, c, val, 1.0) for r, c, val in merges]
         
-        # Add new tile (regular only - bombs are placed manually)
         new_pos = func.newNum(playingGrid)
         
         if new_pos:
             new_tile_pos = new_pos
             new_tile_scale = 0
             r, c = new_pos
-            if playingGrid[r][c] > 0:  # Only add points for regular tiles
+            if playingGrid[r][c] > 0:
                 points_gained += playingGrid[r][c]
         
         points += points_gained
@@ -208,28 +427,23 @@ def update_animations(dt):
     if not animating:
         return
     
-    # Update animation progress
     animation_progress += animation_speed
     
-    # Update moving tiles
     eased_progress = ease_out_cubic(min(animation_progress, 1.0))
     moving_tiles = [(sr, sc, er, ec, val, eased_progress) for sr, sc, er, ec, val, _ in moving_tiles]
     
-    # Update merging tiles (scale effect)
     if animation_progress > 0.6:
         merge_progress = (animation_progress - 0.6) / 0.4
         for i, (r, c, val, _) in enumerate(merging_tiles):
             if merge_progress < 0.5:
-                scale = 1.0 + merge_progress * 0.4  # Scale up to 1.2
+                scale = 1.0 + merge_progress * 0.4
             else:
-                scale = 1.2 - (merge_progress - 0.5) * 0.4  # Scale back to 1.0
+                scale = 1.2 - (merge_progress - 0.5) * 0.4
             merging_tiles[i] = (r, c, val, scale)
     
-    # Update new tile animation
     if new_tile_pos and animation_progress > 0.7:
         new_tile_scale = min((animation_progress - 0.7) / 0.3, 1.0)
     
-    # End animation
     if animation_progress >= 1.0:
         animating = False
         moving_tiles = []
@@ -241,40 +455,31 @@ def draw_tile(r, c, value, scale=1.0, alpha=255):
     x = start_x + c * square_size
     y = start_y + r * square_size
     
-    # Calculate scaled size
     scaled_size = square_size * scale
     offset = (square_size - scaled_size) / 2
     
-    # Create surface for tile
     tile_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
     
-    # Draw colored rectangle
     color = pygame.Color(get_tile_color(value))
     color.a = alpha
     pygame.draw.rect(tile_surface, color, (0, 0, scaled_size, scaled_size))
     pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
     
-    # Draw bomb or text
     if value == -1 and bomb_image:
-        # Draw bomb image
         bomb_scaled = pygame.transform.scale(bomb_image, (int(scaled_size * 0.8), int(scaled_size * 0.8)))
         bomb_rect = bomb_scaled.get_rect(center=(scaled_size//2, scaled_size//2))
         tile_surface.blit(bomb_scaled, bomb_rect)
     elif value != 0:
-        # Draw text
         text = font.render(str(value), True, "#eceff4")
         text_rect = text.get_rect(center=(scaled_size//2, scaled_size//2))
         tile_surface.blit(text, text_rect)
     
-    # Blit to render surface
     render_surface.blit(tile_surface, (x + offset, y + offset))
 
 def draw_button(x, y, width, height, text, cost, can_afford, active=False):
-    """Draw ability button"""
-    # Button background
     if can_afford and not active:
-        color = "#81a1c1"
-        hover_color = "#5e81ac"
+        color = "#88c0d0"
+        hover_color = "#81a1c1"
     elif active:
         color = "#a3be8c"
         hover_color = "#a3be8c"
@@ -282,9 +487,7 @@ def draw_button(x, y, width, height, text, cost, can_afford, active=False):
         color = "#4c566a"
         hover_color = "#4c566a"
     
-    # Check hover
     mouse_pos = pygame.mouse.get_pos()
-    # Scale mouse position to render coordinates
     mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
     mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
     
@@ -292,11 +495,9 @@ def draw_button(x, y, width, height, text, cost, can_afford, active=False):
     
     button_color = hover_color if is_hover else color
     
-    # Draw button
     pygame.draw.rect(render_surface, button_color, (x, y, width, height))
     pygame.draw.rect(render_surface, "#d8dee9", (x, y, width, height), 3)
     
-    # Draw text
     if active:
         button_text = small_font.render("ACTIVE", True, "#eceff4")
     else:
@@ -304,7 +505,6 @@ def draw_button(x, y, width, height, text, cost, can_afford, active=False):
     text_rect = button_text.get_rect(center=(x + width//2, y + height//3))
     render_surface.blit(button_text, text_rect)
     
-    # Draw cost
     if not active:
         cost_color = "#a3be8c" if can_afford else "#bf616a"
         cost_text = small_font.render(f"Cost: {cost}", True, cost_color)
@@ -314,14 +514,11 @@ def draw_button(x, y, width, height, text, cost, can_afford, active=False):
     return is_hover and can_afford and not active
 
 def handle_button_click(mouse_pos):
-    """Handle button clicks"""
     global points, next_tile_is_bomb, selecting_bomb_position
     
-    # Scale mouse position to render coordinates
     mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
     mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
     
-    # Check bomb button (use the actual button Y position)
     button_y = menu_y + 30
     if button_x <= mouse_x <= button_x + button_width and button_y <= mouse_y <= button_y + button_height:
         if points >= bomb_ability_cost and not selecting_bomb_position:
@@ -330,39 +527,62 @@ def handle_button_click(mouse_pos):
             print(f"Bomb ability activated! Click an empty tile to place the bomb. Score: {points}")
 
 def get_tile_from_mouse(mouse_pos):
-    """Convert mouse position to grid coordinates"""
     mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
     mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
     
-    # Check if mouse is within grid bounds
     if start_x <= mouse_x <= start_x + grid_width and start_y <= mouse_y <= start_y + grid_height:
         c = int((mouse_x - start_x) // square_size)
         r = int((mouse_y - start_y) // square_size)
         
-        # Ensure within bounds
         if 0 <= r < rows and 0 <= c < cols:
             return (r, c)
     
     return None
 
 def place_bomb_at_tile(r, c):
-    """Place a bomb at the specified tile with animation"""
     global playingGrid, selecting_bomb_position, animating, new_tile_pos, new_tile_scale, animation_progress
     
-    if playingGrid[r][c] == 0:  # Only place on empty tiles
+    if playingGrid[r][c] == 0:
         playingGrid[r][c] = -1
         selecting_bomb_position = False
         
-        # Trigger spawn animation
         animating = True
-        animation_progress = 0.7  # Start at the new tile animation phase
+        animation_progress = 0.7
         new_tile_pos = (r, c)
         new_tile_scale = 0
         
         print(f"Bomb placed at position ({r}, {c})")
 
-while running: # game logic game loop
-    dt = clock.tick(60) / 1000.0  # Delta time in seconds
+def render_to_opengl():
+    """Convert pygame surface to OpenGL texture and render with CRT shader"""
+    # Convert pygame surface to texture data
+    texture_data = pygame.image.tostring(render_surface, 'RGB', True)
+    texture.write(texture_data)
+    
+    # Update shader uniforms
+    prog['TextureSize'].value = (RENDER_WIDTH, RENDER_HEIGHT)
+    prog['InputSize'].value = (RENDER_WIDTH, RENDER_HEIGHT)
+    prog['hardScan'].value = crt_params['hardScan']
+    prog['hardPix'].value = crt_params['hardPix']
+    prog['warpX'].value = crt_params['warpX']
+    prog['warpY'].value = crt_params['warpY']
+    prog['maskDark'].value = crt_params['maskDark']
+    prog['maskLight'].value = crt_params['maskLight']
+    prog['shadowMask'].value = crt_params['shadowMask']
+    prog['brightBoost'].value = crt_params['brightBoost']
+    prog['hardBloomPix'].value = crt_params['hardBloomPix']
+    prog['hardBloomScan'].value = crt_params['hardBloomScan']
+    prog['bloomAmount'].value = crt_params['bloomAmount']
+    prog['shape'].value = crt_params['shape']
+    
+    # Render
+    ctx.clear(0.0, 0.0, 0.0)
+    texture.use(0)
+    prog['Texture'].value = 0
+    vao.render(moderngl.TRIANGLE_STRIP)
+
+while running:
+    dt = clock.tick(60) / 1000.0
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -380,9 +600,8 @@ while running: # game logic game loop
                     process_move("right")
                 case pygame.K_ESCAPE:
                     if selecting_bomb_position:
-                        # Cancel bomb selection
                         selecting_bomb_position = False
-                        points += bomb_ability_cost  # Refund
+                        points += bomb_ability_cost
                         print("Bomb placement cancelled. Points refunded.")
                     else:
                         running = False
@@ -394,41 +613,34 @@ while running: # game logic game loop
                 hovered_tile = get_tile_from_mouse(event.pos)
         
         if event.type == pygame.MOUSEBUTTONDOWN and not animating:
-            if event.button == 1:  # Left click
+            if event.button == 1:
                 if selecting_bomb_position:
-                    # Try to place bomb on clicked tile
                     tile = get_tile_from_mouse(event.pos)
                     if tile:
                         r, c = tile
                         place_bomb_at_tile(r, c)
                 else:
-                    # Normal button click
                     handle_button_click(event.pos)
 
-    # Update animations
     update_animations(dt)
 
-    # Draw background on render surface
+    # Draw to pygame surface
     render_surface.fill("#4c566a")
     
-    # Draw score
     score_text = font.render(f"Score: {points}", True, "#eceff4")
     render_surface.blit(score_text, (50, 50))
 
-    # Draw grid cells
     for r in range(rows):
         for c in range(cols):
             x = start_x + c * square_size
             y = start_y + r * square_size
             
-            # Highlight hovered empty tile during bomb selection
             if selecting_bomb_position and hovered_tile == (r, c) and playingGrid[r][c] == 0:
                 pygame.draw.rect(render_surface, "#a3be8c", (x, y, square_size, square_size))
                 pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 4)
             else:
                 pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 2)
 
-    # Draw static tiles (not moving or merging)
     if not animating:
         for r in range(rows):
             for c in range(cols):
@@ -436,7 +648,6 @@ while running: # game logic game loop
                 if value:
                     draw_tile(r, c, value)
     else:
-        # Draw tiles that aren't involved in animations
         moving_positions = {(sr, sc) for sr, sc, _, _, _, _ in moving_tiles}
         merging_positions = {(r, c) for r, c, _, _ in merging_tiles}
         
@@ -444,69 +655,40 @@ while running: # game logic game loop
             for c in range(cols):
                 value = playingGrid[r][c]
                 if value and (r, c) not in merging_positions and (r, c) != new_tile_pos:
-                    # Check if this tile is being moved from somewhere
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in moving_tiles)
                     if not is_moving_destination or animation_progress >= 1.0:
                         draw_tile(r, c, value)
         
-        # Draw moving tiles
         for sr, sc, er, ec, val, progress in moving_tiles:
             r_pos = lerp(sr, er, progress)
             c_pos = lerp(sc, ec, progress)
             draw_tile(r_pos, c_pos, val)
         
-        # Draw merging tiles
         for r, c, val, scale in merging_tiles:
             draw_tile(r, c, val, scale)
         
-        # Draw new tile with pop-in animation
         if new_tile_pos and new_tile_scale > 0:
             r, c = new_tile_pos
             scale = ease_out_cubic(new_tile_scale)
             draw_tile(r, c, playingGrid[r][c], scale)
     
-    # Draw ability menu
     if selecting_bomb_position:
         instruction_text = small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
-        instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y)) # x, y position
+        instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y - 30))
         render_surface.blit(instruction_text, instruction_rect)
     else:
         menu_title = font.render("ABILITIES", True, "#eceff4")
         menu_title_rect = menu_title.get_rect(center=(RENDER_WIDTH//2, menu_y))
         render_surface.blit(menu_title, menu_title_rect)
     
-    # Draw bomb button
     can_afford = points >= bomb_ability_cost
     draw_button(button_x, menu_y + 30, button_width, button_height, 
                 "Bomb Tile", bomb_ability_cost, can_afford, selecting_bomb_position)
     
-    # Apply CRT effects on render surface
-    crt_surface.blit(render_surface, (0, 0))
+    # Render to OpenGL with CRT shader
+    render_to_opengl()
     
-    # 2. Add slight glow/bloom effect
-    glow_surface = crt_surface.copy()
-    glow_surface.set_alpha(30)
-    render_surface.blit(glow_surface, (2, 2))
-    render_surface.blit(glow_surface, (-2, -2))
-    
-    # 3. Apply scanlines
-    render_surface.blit(scanline_surface, (0, 0))
-    
-    # 4. Apply vignette
-    render_surface.blit(vignette_surface, (0, 0))
-    
-    # 5. Add slight RGB shift for chromatic aberration
-    if animating:  # Add subtle shift during animations
-        shift_amount = int(abs(np.sin(animation_progress * np.pi)) * 2)
-        if shift_amount > 0:
-            # Red channel shift
-            red_surface = render_surface.copy()
-            red_surface.set_alpha(100)
-            render_surface.blit(red_surface, (shift_amount, 0))
-    
-    # Scale up the render surface to current display resolution and show
-    pygame.transform.scale(render_surface, (display_width, display_height), screen)
     pygame.display.flip()
 
-
 pygame.quit()
+ctx.release()
