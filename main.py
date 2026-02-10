@@ -62,7 +62,8 @@ playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
 playingGridLast = playingGrid.copy()
 
 # Score tracking - start with initial tiles
-points = sum(sum(playingGrid))
+# points = sum(sum(playingGrid))
+points = 900000
 
 # Ability system
 bomb_ability_cost = 750
@@ -319,8 +320,9 @@ def handle_button_click(mouse_pos):
     mouse_x = mouse_pos[0] * RENDER_WIDTH / display_width
     mouse_y = mouse_pos[1] * RENDER_HEIGHT / display_height
     
-    # Check bomb button
-    if button_x <= mouse_x <= button_x + button_width and menu_y <= mouse_y <= menu_y + button_height:
+    # Check bomb button (use the actual button Y position)
+    button_y = menu_y + 30
+    if button_x <= mouse_x <= button_x + button_width and button_y <= mouse_y <= button_y + button_height:
         if points >= bomb_ability_cost and not selecting_bomb_position:
             points -= bomb_ability_cost
             selecting_bomb_position = True
@@ -465,7 +467,7 @@ while running: # game logic game loop
     # Draw ability menu
     if selecting_bomb_position:
         instruction_text = small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
-        instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y - 30))
+        instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y)) # x, y position
         render_surface.blit(instruction_text, instruction_rect)
     else:
         menu_title = font.render("ABILITIES", True, "#eceff4")

@@ -5,8 +5,9 @@ dictionary:
   points:
     uses to buy abilites as you progress through levels.
 
-bomb:
-  blows up a node.
+added:
+  bomb:
+    blows up a node.
 
 freeze:
   freezes a node for a stacking duration.
