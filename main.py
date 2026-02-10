@@ -272,8 +272,8 @@ def draw_button(x, y, width, height, text, cost, can_afford, active=False):
     """Draw ability button"""
     # Button background
     if can_afford and not active:
-        color = "#88c0d0"
-        hover_color = "#81a1c1"
+        color = "#81a1c1"
+        hover_color = "#5e81ac"
     elif active:
         color = "#a3be8c"
         hover_color = "#a3be8c"
