@@ -10,9 +10,9 @@ import array
 # pygame setup
 pygame.init()
 
-# Native monitor resolution (fullscreen)
-NATIVE_WIDTH = 3840
-NATIVE_HEIGHT = 2400
+# Native monitor resolution (fullscreen) / display resolution
+NATIVE_WIDTH = 1920
+NATIVE_HEIGHT = 1200
 
 # Render resolution (lower for performance)
 RENDER_WIDTH = 3840
@@ -135,7 +135,7 @@ crt_params = {
     'maskDark': 0.3,  # Much darker mask (was 0.5)
     'maskLight': 1.8,  # Brighter phosphors (was 1.5)
     'shadowMask': 0.0,  # VGA-style RGB triads
-    'brightBoost': 0.9,  # Higher brightness to compensate
+    'brightBoost': 1.1,  # Higher brightness to compensate
     'hardBloomPix': -1.5,
     'hardBloomScan': -2.0,
     'bloomAmount': 0.20,  # More bloom/glow
