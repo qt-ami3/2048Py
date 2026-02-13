@@ -15,8 +15,8 @@ NATIVE_WIDTH = 3840
 NATIVE_HEIGHT = 2400
 
 # Render resolution (lower for performance)
-RENDER_WIDTH = 1920
-RENDER_HEIGHT = 1200
+RENDER_WIDTH = 3840
+RENDER_HEIGHT = 2400
 
 # Windowed resolution (smaller for windowed mode)
 WINDOW_WIDTH = 1280
@@ -52,7 +52,7 @@ small_font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 20)
 
 # Grid config
 square_size = 100
-rows, cols = 5, 5
+rows, cols = 4, 4
 
 grid_width = cols * square_size
 grid_height = rows * square_size
@@ -98,6 +98,16 @@ moving_tiles = []
 merging_tiles = []
 new_tile_pos = None
 new_tile_scale = 0
+
+# Grid expansion animation
+grid_expanding = False
+expand_progress = 0
+expand_speed = 0.03
+pending_expand = False
+expand_old_rows = 0
+expand_old_cols = 0
+expand_old_sx = 0
+expand_old_sy = 0
 
 # Color scheme
 COLORS = {
@@ -362,6 +372,61 @@ def lerp(start, end, t):
 def ease_out_cubic(t):
     return 1 - pow(1 - t, 3)
 
+# Pre-rendered tile surface cache
+tile_cache = {}
+
+def init_tile_cache():
+    for value in list(COLORS.keys()):
+        if value == 0:
+            continue
+        surface = pygame.Surface((square_size, square_size), pygame.SRCALPHA)
+        color = pygame.Color(get_tile_color(value))
+        pygame.draw.rect(surface, color, (0, 0, square_size, square_size))
+        pygame.draw.rect(surface, "#d8dee9", (0, 0, square_size, square_size), 2)
+        if value == -1 and bomb_image:
+            bomb_scaled = pygame.transform.scale(bomb_image, (int(square_size * 0.8), int(square_size * 0.8)))
+            bomb_rect = bomb_scaled.get_rect(center=(square_size // 2, square_size // 2))
+            surface.blit(bomb_scaled, bomb_rect)
+        else:
+            text = font.render(str(value), True, "#eceff4")
+            text_rect = text.get_rect(center=(square_size // 2, square_size // 2))
+            surface.blit(text, text_rect)
+        tile_cache[value] = surface
+
+init_tile_cache()
+
+# Score text cache
+_score_cache = {'text': None, 'surface': None}
+
+def get_cached_score(score_value):
+    text = f"Score: {score_value}"
+    if _score_cache['text'] != text:
+        _score_cache['text'] = text
+        _score_cache['surface'] = font.render(text, True, "#eceff4")
+    return _score_cache['surface']
+
+def prepare_tile_surface(value, scale):
+    """Create a scaled tile surface - safe for thread pool execution"""
+    if scale == 1.0 and value in tile_cache:
+        return tile_cache[value]
+    scaled_size = max(int(square_size * scale), 1)
+    if value in tile_cache:
+        return pygame.transform.smoothscale(tile_cache[value], (scaled_size, scaled_size))
+    surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
+    color = pygame.Color(get_tile_color(value))
+    pygame.draw.rect(surface, color, (0, 0, scaled_size, scaled_size))
+    pygame.draw.rect(surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
+    if value == -1 and bomb_image:
+        bsz = int(scaled_size * 0.8)
+        bomb_s = pygame.transform.scale(bomb_image, (bsz, bsz))
+        bomb_r = bomb_s.get_rect(center=(scaled_size // 2, scaled_size // 2))
+        surface.blit(bomb_s, bomb_r)
+    elif value != 0:
+        text = font.render(str(value), True, "#eceff4")
+        text_r = text.get_rect(center=(scaled_size // 2, scaled_size // 2))
+        surface.blit(text, text_r)
+    return surface
+
 def toggle_fullscreen():
     global is_fullscreen, screen, display_width, display_height, ctx, fbo
     
@@ -378,9 +443,42 @@ def toggle_fullscreen():
     ctx = moderngl.create_context()
     fbo = ctx.framebuffer(color_attachments=[ctx.texture((display_width, display_height), 4)])
 
+def start_grid_expansion():
+    global rows, cols, playingGrid, playingGridLast, grid_width, grid_height
+    global start_x, start_y, menu_y, button_x
+    global grid_expanding, expand_progress, expand_old_rows, expand_old_cols
+    global expand_old_sx, expand_old_sy
+
+    expand_old_sx = start_x
+    expand_old_sy = start_y
+    expand_old_rows = rows
+    expand_old_cols = cols
+
+    if rand.choice([True, False]):
+        rows += 1
+    else:
+        cols += 1
+
+    new_grid = np.zeros((rows, cols), dtype=int)
+    new_grid[:expand_old_rows, :expand_old_cols] = playingGrid
+    playingGrid = new_grid
+    playingGridLast = playingGrid.copy()
+
+    grid_width = cols * square_size
+    grid_height = rows * square_size
+    start_x = (RENDER_WIDTH - grid_width) // 2
+    start_y = (RENDER_HEIGHT - grid_height) // 2
+    menu_y = start_y + grid_height + 30
+    button_x = start_x + (grid_width - button_width) // 2
+
+    grid_expanding = True
+    expand_progress = 0
+
+    print(f"Grid expanded to {rows}x{cols}!")
+
 def process_move(direction):
     global playingGrid, playingGridLast, animating, moving_tiles, merging_tiles
-    global animation_progress, new_tile_pos, new_tile_scale, points, next_tile_is_bomb
+    global animation_progress, new_tile_pos, new_tile_scale, points, next_tile_is_bomb, pending_expand
     
     if animating:
         return
@@ -417,13 +515,27 @@ def process_move(direction):
                 points_gained += playingGrid[r][c]
         
         points += points_gained
+
+        # Check if any merge created a 2048 tile
+        if any(val == 2048 for _, _, val in merges):
+            pending_expand = True
+
         playingGridLast = playingGrid.copy()
         print()
         print(f"Score: {points} (+{points_gained})")
 
 def update_animations(dt):
     global animating, animation_progress, moving_tiles, merging_tiles, new_tile_scale, new_tile_pos
-    
+    global grid_expanding, expand_progress, pending_expand
+
+    # Update grid expansion animation
+    if grid_expanding:
+        expand_progress += expand_speed
+        if expand_progress >= 1.0:
+            grid_expanding = False
+            expand_progress = 0
+        return
+
     if not animating:
         return
     
@@ -450,30 +562,42 @@ def update_animations(dt):
         merging_tiles = []
         new_tile_pos = None
         new_tile_scale = 0
+        if pending_expand:
+            pending_expand = False
+            start_grid_expansion()
 
 def draw_tile(r, c, value, scale=1.0, alpha=255):
     x = start_x + c * square_size
     y = start_y + r * square_size
-    
-    scaled_size = square_size * scale
+
+    # Fast path: blit directly from cache for standard tiles
+    if scale == 1.0 and alpha == 255 and value in tile_cache:
+        render_surface.blit(tile_cache[value], (x, y))
+        return
+
+    scaled_size = max(int(square_size * scale), 1)
     offset = (square_size - scaled_size) / 2
-    
-    tile_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
-    
-    color = pygame.Color(get_tile_color(value))
-    color.a = alpha
-    pygame.draw.rect(tile_surface, color, (0, 0, scaled_size, scaled_size))
-    pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
-    
-    if value == -1 and bomb_image:
-        bomb_scaled = pygame.transform.scale(bomb_image, (int(scaled_size * 0.8), int(scaled_size * 0.8)))
-        bomb_rect = bomb_scaled.get_rect(center=(scaled_size//2, scaled_size//2))
-        tile_surface.blit(bomb_scaled, bomb_rect)
-    elif value != 0:
-        text = font.render(str(value), True, "#eceff4")
-        text_rect = text.get_rect(center=(scaled_size//2, scaled_size//2))
-        tile_surface.blit(text, text_rect)
-    
+
+    if value in tile_cache:
+        tile_surface = pygame.transform.smoothscale(tile_cache[value], (scaled_size, scaled_size))
+    else:
+        tile_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
+        color = pygame.Color(get_tile_color(value))
+        color.a = alpha
+        pygame.draw.rect(tile_surface, color, (0, 0, scaled_size, scaled_size))
+        pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
+        if value == -1 and bomb_image:
+            bomb_scaled = pygame.transform.scale(bomb_image, (int(scaled_size * 0.8), int(scaled_size * 0.8)))
+            bomb_rect = bomb_scaled.get_rect(center=(scaled_size // 2, scaled_size // 2))
+            tile_surface.blit(bomb_scaled, bomb_rect)
+        elif value != 0:
+            text = font.render(str(value), True, "#eceff4")
+            text_rect = text.get_rect(center=(scaled_size // 2, scaled_size // 2))
+            tile_surface.blit(text, text_rect)
+
+    if alpha != 255:
+        tile_surface.set_alpha(alpha)
+
     render_surface.blit(tile_surface, (x + offset, y + offset))
 
 def draw_button(x, y, width, height, text, cost, can_afford, active=False):
@@ -555,10 +679,9 @@ def place_bomb_at_tile(r, c):
 
 def render_to_opengl():
     """Convert pygame surface to OpenGL texture and render with CRT shader"""
-    # Convert pygame surface to texture data
+    # Convert surface to texture data
     texture_data = pygame.image.tostring(render_surface, 'RGB', True)
-    texture.write(texture_data)
-    
+
     # Update shader uniforms
     prog['TextureSize'].value = (RENDER_WIDTH, RENDER_HEIGHT)
     prog['InputSize'].value = (RENDER_WIDTH, RENDER_HEIGHT)
@@ -574,7 +697,10 @@ def render_to_opengl():
     prog['hardBloomScan'].value = crt_params['hardBloomScan']
     prog['bloomAmount'].value = crt_params['bloomAmount']
     prog['shape'].value = crt_params['shape']
-    
+
+    # Upload texture data
+    texture.write(texture_data)
+
     # Render
     ctx.clear(0.0, 0.0, 0.0)
     texture.use(0)
@@ -588,7 +714,7 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-        if event.type == pygame.KEYDOWN and not animating:
+        if event.type == pygame.KEYDOWN and not animating and not grid_expanding:
             match event.key:
                 case pygame.K_UP: 
                     process_move("up")
@@ -612,7 +738,7 @@ while running:
             if selecting_bomb_position:
                 hovered_tile = get_tile_from_mouse(event.pos)
         
-        if event.type == pygame.MOUSEBUTTONDOWN and not animating:
+        if event.type == pygame.MOUSEBUTTONDOWN and not animating and not grid_expanding:
             if event.button == 1:
                 if selecting_bomb_position:
                     tile = get_tile_from_mouse(event.pos)
@@ -627,30 +753,53 @@ while running:
     # Draw to pygame surface
     render_surface.fill("#4c566a")
     
-    score_text = font.render(f"Score: {points}", True, "#eceff4")
+    # Draw score (cached - only re-renders when score changes)
+    score_text = get_cached_score(points)
     render_surface.blit(score_text, (50, 50))
+
+    # Temporarily override start positions for expansion animation
+    _expand_real_sx, _expand_real_sy = start_x, start_y
+    if grid_expanding:
+        t = ease_out_cubic(expand_progress)
+        start_x = int(lerp(expand_old_sx, _expand_real_sx, t))
+        start_y = int(lerp(expand_old_sy, _expand_real_sy, t))
 
     for r in range(rows):
         for c in range(cols):
             x = start_x + c * square_size
             y = start_y + r * square_size
-            
+
+            is_new_cell = grid_expanding and (r >= expand_old_rows or c >= expand_old_cols)
+
             if selecting_bomb_position and hovered_tile == (r, c) and playingGrid[r][c] == 0:
                 pygame.draw.rect(render_surface, "#a3be8c", (x, y, square_size, square_size))
                 pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 4)
+            elif is_new_cell:
+                # New cell stretches/fades in during expansion
+                alpha = int(255 * ease_out_cubic(expand_progress))
+                cell_scale = ease_out_cubic(expand_progress)
+                scaled = max(int(square_size * cell_scale), 1)
+                off = (square_size - scaled) // 2
+                cell_surf = pygame.Surface((scaled, scaled), pygame.SRCALPHA)
+                border_color = pygame.Color("#d8dee9")
+                pygame.draw.rect(cell_surf, (border_color.r, border_color.g, border_color.b, alpha),
+                               (0, 0, scaled, scaled), 2)
+                render_surface.blit(cell_surf, (x + off, y + off))
             else:
                 pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 2)
 
+    # Draw tiles
     if not animating:
+        # Static tiles: blit directly from cache (no threading needed)
         for r in range(rows):
             for c in range(cols):
                 value = playingGrid[r][c]
                 if value:
                     draw_tile(r, c, value)
     else:
-        moving_positions = {(sr, sc) for sr, sc, _, _, _, _ in moving_tiles}
         merging_positions = {(r, c) for r, c, _, _ in merging_tiles}
-        
+
+        # Draw static tiles from cache
         for r in range(rows):
             for c in range(cols):
                 value = playingGrid[r][c]
@@ -658,20 +807,40 @@ while running:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in moving_tiles)
                     if not is_moving_destination or animation_progress >= 1.0:
                         draw_tile(r, c, value)
-        
+
+        # Draw moving tiles from cache
         for sr, sc, er, ec, val, progress in moving_tiles:
             r_pos = lerp(sr, er, progress)
             c_pos = lerp(sc, ec, progress)
             draw_tile(r_pos, c_pos, val)
-        
-        for r, c, val, scale in merging_tiles:
-            draw_tile(r, c, val, scale)
-        
+
+        # Draw merging tiles
+        for mr, mc, mval, mscale in merging_tiles:
+            if mscale == 1.0:
+                draw_tile(mr, mc, mval)
+            else:
+                surface = prepare_tile_surface(mval, mscale)
+                if surface:
+                    x = start_x + mc * square_size
+                    y = start_y + mr * square_size
+                    offset = (square_size - surface.get_width()) / 2
+                    render_surface.blit(surface, (x + offset, y + offset))
+
+        # Draw new tile spawn animation
         if new_tile_pos and new_tile_scale > 0:
-            r, c = new_tile_pos
-            scale = ease_out_cubic(new_tile_scale)
-            draw_tile(r, c, playingGrid[r][c], scale)
-    
+            nr, nc = new_tile_pos
+            nscale = ease_out_cubic(new_tile_scale)
+            surface = prepare_tile_surface(playingGrid[nr][nc], nscale)
+            if surface:
+                x = start_x + nc * square_size
+                y = start_y + nr * square_size
+                offset = (square_size - surface.get_width()) / 2
+                render_surface.blit(surface, (x + offset, y + offset))
+
+    # Restore start positions after expansion animation drawing
+    if grid_expanding:
+        start_x, start_y = _expand_real_sx, _expand_real_sy
+
     if selecting_bomb_position:
         instruction_text = small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
         instruction_rect = instruction_text.get_rect(center=(RENDER_WIDTH//2, menu_y - 30))
