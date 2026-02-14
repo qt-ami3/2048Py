@@ -11,8 +11,8 @@ import array
 pygame.init()
 
 # Native monitor resolution (fullscreen) / display resolution
-NATIVE_WIDTH = 1680
-NATIVE_HEIGHT = 1050
+NATIVE_WIDTH = 1920
+NATIVE_HEIGHT = 1200
 
 # Render resolution (lower for performance)
 RENDER_WIDTH = 3840
