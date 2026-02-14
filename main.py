@@ -50,16 +50,73 @@ pygame.font.init()
 font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 29)
 small_font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 20)
 
-# Grid config
-square_size = 100
-rows, cols = 4, 4
+# UI Configuration - centralized sizing and spacing
+ui_config = {
+    # Grid settings
+    'square_size': 150,        # Width and height of each grid tile in pixels
+    'initial_rows': 4,         # Number of rows when game starts
+    'initial_cols': 4,         # Number of columns when game starts
 
-grid_width = cols * square_size
-grid_height = rows * square_size
+    # Menu settings
+    'menu_height': 150,        # Total height reserved for menu area below grid
+    'menu_spacing': 90,        # Vertical gap between bottom of grid and top of menu
+    'button_width': 200,       # Width of ability buttons (e.g., Bomb Tile button)
+    'button_height': 60,       # Height of ability buttons
 
-start_x = (RENDER_WIDTH - grid_width) // 2
-start_y = (RENDER_HEIGHT - grid_height) // 2
+    # Visual settings
+    'grid_border_width': 2,    # Thickness of borders around empty grid cells
+    'tile_border_width': 2,    # Thickness of borders around number tiles
+    'bomb_scale': 0.8,         # Bomb sprite size as a ratio of tile size (0.8 = 80% of tile)
 
+    # Spacing
+    'score_x': 50,             # X position of score text from left edge
+    'score_y': 50,             # Y position of score text from top edge
+}
+
+# Grid state - tracks current grid dimensions and tile size
+rows, cols = ui_config['initial_rows'], ui_config['initial_cols']  # Current grid dimensions (grows with expansion)
+square_size = ui_config['square_size']  # Size of each tile (cached from ui_config)
+
+# Calculated positions: automatically computed based on grid size and screen resolution
+# These are updated by recalculate_positions() whenever the grid expands
+grid_width = 0   # Total width of the playing grid in pixels (cols * square_size)
+grid_height = 0  # Total height of the playing grid in pixels (rows * square_size)
+start_x = 0      # X coordinate where grid starts (horizontally centered on screen)
+start_y = 0      # Y coordinate where grid starts (vertically centered with menu below)
+menu_y = 0       # Y coordinate where menu/abilities section begins
+button_x = 0     # X coordinate where ability buttons start (horizontally centered)
+button_width = ui_config['button_width']    # Cached button dimensions
+button_height = ui_config['button_height']
+menu_height = ui_config['menu_height']
+
+def recalculate_positions():
+    """
+    Recalculate all UI positions based on current grid size and render resolution.
+
+    Called when:
+    - Game starts (initialization)
+    - Grid expands after achieving 2048
+    - Resolution changes (if implemented)
+
+    Updates:
+    - grid_width, grid_height: Total grid dimensions
+    - start_x, start_y: Grid position (centered on screen)
+    - menu_y: Menu position (below grid with spacing)
+    - button_x: Button position (centered horizontally)
+    """
+    global grid_width, grid_height, start_x, start_y, menu_y, button_x
+
+    grid_width = cols * square_size                                    # Total grid width
+    grid_height = rows * square_size                                   # Total grid height
+    start_x = (RENDER_WIDTH - grid_width) // 2                        # Center grid horizontally
+    start_y = (RENDER_HEIGHT - grid_height) // 2                      # Center grid vertically
+    menu_y = start_y + grid_height + ui_config['menu_spacing']        # Position menu below grid
+    button_x = start_x + (grid_width - button_width) // 2             # Center buttons horizontally
+
+# Initialize positions
+recalculate_positions()
+
+# Initialize playing grid
 playingGrid = np.zeros((rows, cols), dtype=int)
 
 func.newNum(playingGrid)
@@ -79,16 +136,10 @@ hovered_tile = None
 bomb_image = None
 try:
     bomb_image = pygame.image.load("assets/sprites/bomb.png")
-    bomb_image = pygame.transform.scale(bomb_image, (80, 80))
+    bomb_size = int(square_size * ui_config['bomb_scale'])
+    bomb_image = pygame.transform.scale(bomb_image, (bomb_size, bomb_size))
 except:
     print("Warning: Could not load bomb.png")
-
-# Menu configuration
-menu_height = 150
-menu_y = start_y + grid_height + 30
-button_width = 200
-button_height = 60
-button_x = start_x + (grid_width - button_width) // 2
 
 # Animation variables
 animating = False
@@ -389,9 +440,10 @@ def init_tile_cache():
         surface = pygame.Surface((square_size, square_size), pygame.SRCALPHA)
         color = pygame.Color(get_tile_color(value))
         pygame.draw.rect(surface, color, (0, 0, square_size, square_size))
-        pygame.draw.rect(surface, "#d8dee9", (0, 0, square_size, square_size), 2)
+        pygame.draw.rect(surface, "#d8dee9", (0, 0, square_size, square_size), ui_config['tile_border_width'])
         if value == -1 and bomb_image:
-            bomb_scaled = pygame.transform.scale(bomb_image, (int(square_size * 0.8), int(square_size * 0.8)))
+            bomb_size = int(square_size * ui_config['bomb_scale'])
+            bomb_scaled = pygame.transform.scale(bomb_image, (bomb_size, bomb_size))
             bomb_rect = bomb_scaled.get_rect(center=(square_size // 2, square_size // 2))
             surface.blit(bomb_scaled, bomb_rect)
         else:
@@ -422,9 +474,9 @@ def prepare_tile_surface(value, scale):
     surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
     color = pygame.Color(get_tile_color(value))
     pygame.draw.rect(surface, color, (0, 0, scaled_size, scaled_size))
-    pygame.draw.rect(surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
+    pygame.draw.rect(surface, "#d8dee9", (0, 0, scaled_size, scaled_size), ui_config['tile_border_width'])
     if value == -1 and bomb_image:
-        bsz = int(scaled_size * 0.8)
+        bsz = int(scaled_size * ui_config['bomb_scale'])
         bomb_s = pygame.transform.scale(bomb_image, (bsz, bsz))
         bomb_r = bomb_s.get_rect(center=(scaled_size // 2, scaled_size // 2))
         surface.blit(bomb_s, bomb_r)
@@ -451,8 +503,7 @@ def toggle_fullscreen():
     fbo = ctx.framebuffer(color_attachments=[ctx.texture((display_width, display_height), 4)])
 
 def start_grid_expansion():
-    global rows, cols, playingGrid, playingGridLast, grid_width, grid_height
-    global start_x, start_y, menu_y, button_x
+    global rows, cols, playingGrid, playingGridLast
     global grid_expanding, expand_progress, expand_old_rows, expand_old_cols
     global expand_old_sx, expand_old_sy, expand_direction
 
@@ -482,12 +533,8 @@ def start_grid_expansion():
     playingGrid = new_grid
     playingGridLast = playingGrid.copy()
 
-    grid_width = cols * square_size
-    grid_height = rows * square_size
-    start_x = (RENDER_WIDTH - grid_width) // 2
-    start_y = (RENDER_HEIGHT - grid_height) // 2
-    menu_y = start_y + grid_height + 30
-    button_x = start_x + (grid_width - button_width) // 2
+    # Recalculate all positions based on new grid size
+    recalculate_positions()
 
     grid_expanding = True
     expand_progress = 0
@@ -603,9 +650,10 @@ def draw_tile(r, c, value, scale=1.0, alpha=255):
         color = pygame.Color(get_tile_color(value))
         color.a = alpha
         pygame.draw.rect(tile_surface, color, (0, 0, scaled_size, scaled_size))
-        pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), 2)
+        pygame.draw.rect(tile_surface, "#d8dee9", (0, 0, scaled_size, scaled_size), ui_config['tile_border_width'])
         if value == -1 and bomb_image:
-            bomb_scaled = pygame.transform.scale(bomb_image, (int(scaled_size * 0.8), int(scaled_size * 0.8)))
+            bomb_size = int(scaled_size * ui_config['bomb_scale'])
+            bomb_scaled = pygame.transform.scale(bomb_image, (bomb_size, bomb_size))
             bomb_rect = bomb_scaled.get_rect(center=(scaled_size // 2, scaled_size // 2))
             tile_surface.blit(bomb_scaled, bomb_rect)
         elif value != 0:
@@ -620,8 +668,8 @@ def draw_tile(r, c, value, scale=1.0, alpha=255):
 
 def draw_button(x, y, width, height, text, cost, can_afford, active=False):
     if can_afford and not active:
-        color = "#88c0d0"
-        hover_color = "#81a1c1"
+        color = "#81a1c1"
+        hover_color = "#88c0d0"
     elif active:
         color = "#a3be8c"
         hover_color = "#a3be8c"
@@ -773,7 +821,7 @@ while running:
     
     # Draw score (cached - only re-renders when score changes)
     score_text = get_cached_score(points)
-    render_surface.blit(score_text, (50, 50))
+    render_surface.blit(score_text, (ui_config['score_x'], ui_config['score_y']))
 
     # Temporarily override start positions for expansion animation
     _expand_real_sx, _expand_real_sy = start_x, start_y
@@ -813,10 +861,10 @@ while running:
                 cell_surf = pygame.Surface((scaled, scaled), pygame.SRCALPHA)
                 border_color = pygame.Color("#d8dee9")
                 pygame.draw.rect(cell_surf, (border_color.r, border_color.g, border_color.b, alpha),
-                               (0, 0, scaled, scaled), 2)
+                               (0, 0, scaled, scaled), ui_config['grid_border_width'])
                 render_surface.blit(cell_surf, (x + off, y + off))
             else:
-                pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), 2)
+                pygame.draw.rect(render_surface, "#d8dee9", (x, y, square_size, square_size), ui_config['grid_border_width'])
 
     # Draw tiles
     if not animating:
