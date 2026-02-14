@@ -104,6 +104,7 @@ expand_old_rows = 0
 expand_old_cols = 0
 expand_old_sx = 0
 expand_old_sy = 0
+expand_direction = ""
 
 # Color scheme
 COLORS = {
@@ -222,20 +223,31 @@ def start_grid_expansion():
     global rows, cols, playingGrid, playingGridLast, grid_width, grid_height
     global start_x, start_y, menu_y, button_x
     global grid_expanding, expand_progress, expand_old_rows, expand_old_cols
-    global expand_old_sx, expand_old_sy
+    global expand_old_sx, expand_old_sy, expand_direction
 
     expand_old_sx = start_x
     expand_old_sy = start_y
     expand_old_rows = rows
     expand_old_cols = cols
 
-    if rand.choice([True, False]):
+    expand_direction = rand.choice(["up", "down", "left", "right"])
+
+    if expand_direction in ("up", "down"):
         rows += 1
     else:
         cols += 1
 
     new_grid = np.zeros((rows, cols), dtype=int)
-    new_grid[:expand_old_rows, :expand_old_cols] = playingGrid
+
+    if expand_direction == "down":
+        new_grid[:expand_old_rows, :expand_old_cols] = playingGrid
+    elif expand_direction == "up":
+        new_grid[1:, :expand_old_cols] = playingGrid
+    elif expand_direction == "right":
+        new_grid[:expand_old_rows, :expand_old_cols] = playingGrid
+    elif expand_direction == "left":
+        new_grid[:expand_old_rows, 1:] = playingGrid
+
     playingGrid = new_grid
     playingGridLast = playingGrid.copy()
 
@@ -249,7 +261,7 @@ def start_grid_expansion():
     grid_expanding = True
     expand_progress = 0
 
-    print(f"Grid expanded to {rows}x{cols}!")
+    print(f"Grid expanded to {rows}x{cols}! (direction: {expand_direction})")
 
 def process_move(direction):
     global playingGrid, playingGridLast, animating, moving_tiles, merging_tiles
@@ -545,7 +557,19 @@ while running: # game logic game loop
             x = start_x + c * square_size
             y = start_y + r * square_size
 
-            is_new_cell = grid_expanding and (r >= expand_old_rows or c >= expand_old_cols)
+            if grid_expanding:
+                if expand_direction == "down":
+                    is_new_cell = r >= expand_old_rows
+                elif expand_direction == "up":
+                    is_new_cell = r == 0
+                elif expand_direction == "right":
+                    is_new_cell = c >= expand_old_cols
+                elif expand_direction == "left":
+                    is_new_cell = c == 0
+                else:
+                    is_new_cell = False
+            else:
+                is_new_cell = False
 
             # Highlight hovered empty tile during bomb selection
             if selecting_bomb_position and hovered_tile == (r, c) and playingGrid[r][c] == 0:
