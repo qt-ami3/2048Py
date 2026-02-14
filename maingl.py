@@ -364,6 +364,8 @@ vao = ctx.simple_vertex_array(prog, vbo, 'in_vert', 'in_texcoord')
 # Create texture for pygame surface
 texture = ctx.texture((RENDER_WIDTH, RENDER_HEIGHT), 3)
 texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+texture.repeat_x = False
+texture.repeat_y = False
 
 # Setup framebuffer for rendering
 fbo = ctx.framebuffer(color_attachments=[ctx.texture((display_width, display_height), 4)])
