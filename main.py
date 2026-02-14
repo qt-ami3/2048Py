@@ -57,8 +57,8 @@ start_y = (RENDER_HEIGHT - grid_height) // 2
 
 playingGrid = np.zeros((rows, cols), dtype=int)
 
-playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
-playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 2
+func.newNum(playingGrid)
+func.newNum(playingGrid)
 
 playingGridLast = playingGrid.copy()
 

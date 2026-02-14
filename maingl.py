@@ -62,8 +62,8 @@ start_y = (RENDER_HEIGHT - grid_height) // 2
 
 playingGrid = np.zeros((rows, cols), dtype=int)
 
-playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 1024
-playingGrid[rand.randint(0,3)][rand.randint(0,3)] = 1024
+func.newNum(playingGrid)
+func.newNum(playingGrid)
 
 playingGridLast = playingGrid.copy()
 
@@ -131,8 +131,8 @@ COLORS = {
 crt_params = {
     'hardScan': -10.0,  # Very pronounced scanlines (like arcade CRT)
     'hardPix': 0.7,  # Sharper pixels
-    'warpX': 0.10,  # More screen curvature
-    'warpY': 0.12,
+    'warpX': 0.12,  # More screen curvature
+    'warpY': 0.14,
     'maskDark': 0.3,  # Much darker mask (was 0.5)
     'maskLight': 1.8,  # Brighter phosphors (was 1.5)
     'shadowMask': 0.0,  # VGA-style RGB triads
@@ -277,7 +277,7 @@ vec3 Tri(vec2 pos) {
     float wa = Scan(pos, -1.0);
     float wb = Scan(pos, 0.0);
     float wc = Scan(pos, 1.0);
-    return a * wa + b * wb + c * wc;
+    return (a * wa + b * wb + c * wc) / (wa + wb + wc);
 }
 
 vec3 Bloom(vec2 pos) {
@@ -339,10 +339,9 @@ void main() {
     if (shadowMask > 0.0)
         outColor.rgb *= Mask(gl_FragCoord.xy * 1.000001);
 
-    // Horizontal scanlines (proper CRT effect)
-    float scanY = gl_FragCoord.y;
-    float scanline = sin(scanY * 3.14159) * 0.15 + 0.85;
-    outColor.rgb *= scanline;
+    // Horizontal scanlines - 2px dark / 2px bright bands
+    float sl = step(2.0, mod(gl_FragCoord.y, 4.0));
+    outColor.rgb *= mix(0.5, 1.0, sl);
 
     FragColor = vec4(ToSrgb(outColor.rgb), 1.0);
 }
