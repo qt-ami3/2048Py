@@ -245,255 +245,281 @@ def newBomb(grid):
         return (r, c)
     return None
 
-def moveLeft(grid, r, c):
-    moves = []
-    merges = []
-    bomb_destroyed = set()
+def _get_segments(size, frozen_positions):
+    """Split a range into segments separated by frozen positions."""
+    segments = []
+    seg_start = None
+    for idx in range(size):
+        if idx in frozen_positions:
+            if seg_start is not None:
+                segments.append((seg_start, idx))
+                seg_start = None
+        else:
+            if seg_start is None:
+                seg_start = idx
+    if seg_start is not None:
+        segments.append((seg_start, size))
+    return segments
 
-    for i in range(r):
-        row = [(x, j) for j, x in enumerate(grid[i]) if x != 0]
+def _process_segment_left(tiles, row_idx, seg_start, moves, merges, bomb_destroyed):
+    """Process a segment of tiles compacting left. Returns list of result values."""
+    new_vals = []
+    j = 0
+    target = seg_start
+    while j < len(tiles):
+        value, orig = tiles[j]
 
-        if not row:
-            continue
-
-        new_row = []
-
-        j = 0
-        target_col = 0
-        while j < len(row):
-            value, orig_col = row[j]
-
-            if value == -1:
-                if j < len(row) - 1:
-                    if orig_col != target_col:
-                        moves.append((i, orig_col, i, target_col, value))
-                    if row[j + 1][1] != target_col:
-                        moves.append((i, row[j + 1][1], i, target_col, row[j + 1][0]))
-                    bomb_destroyed.add((i, target_col))
-                    j += 2
-                else:
-                    new_row.append(value)
-                    if orig_col != target_col:
-                        moves.append((i, orig_col, i, target_col, value))
-                    j += 1
-                    target_col += 1
-            elif j < len(row) - 1 and row[j + 1][0] == -1:
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
-                if row[j + 1][1] != target_col:
-                    moves.append((i, row[j + 1][1], i, target_col, row[j + 1][0]))
-                bomb_destroyed.add((i, target_col))
+        if value == -1:
+            if j < len(tiles) - 1:
+                if orig != target:
+                    moves.append((row_idx, orig, row_idx, target, value))
+                if tiles[j + 1][1] != target:
+                    moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
+                bomb_destroyed.add((row_idx, target))
                 j += 2
-            elif j < len(row) - 1 and value == row[j + 1][0] and value > 0:
-                new_value = value * 2
-                new_row.append(new_value)
-
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
-                if row[j + 1][1] != target_col:
-                    moves.append((i, row[j + 1][1], i, target_col, row[j + 1][0]))
-
-                merges.append((i, target_col, new_value))
-                j += 2
-                target_col += 1
             else:
-                new_row.append(value)
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
+                new_vals.append(value)
+                if orig != target:
+                    moves.append((row_idx, orig, row_idx, target, value))
                 j += 1
-                target_col += 1
+                target += 1
+        elif j < len(tiles) - 1 and tiles[j + 1][0] == -1:
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            if tiles[j + 1][1] != target:
+                moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
+            bomb_destroyed.add((row_idx, target))
+            j += 2
+        elif j < len(tiles) - 1 and value == tiles[j + 1][0] and value > 0:
+            new_value = value * 2
+            new_vals.append(new_value)
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            if tiles[j + 1][1] != target:
+                moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
+            merges.append((row_idx, target, new_value))
+            j += 2
+            target += 1
+        else:
+            new_vals.append(value)
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            j += 1
+            target += 1
+    return new_vals
 
-        grid[i] = new_row + [0] * (c - len(new_row))
+def _process_segment_right(tiles, row_idx, seg_end, moves, merges, bomb_destroyed):
+    """Process a segment of tiles compacting right. Returns list of result values (left to right)."""
+    new_vals = []
+    j = len(tiles) - 1
+    target = seg_end - 1
+    while j >= 0:
+        value, orig = tiles[j]
 
-    return moves, merges, bomb_destroyed
+        if value == -1:
+            if j > 0:
+                if orig != target:
+                    moves.append((row_idx, orig, row_idx, target, value))
+                if tiles[j - 1][1] != target:
+                    moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
+                bomb_destroyed.add((row_idx, target))
+                j -= 2
+            else:
+                new_vals.insert(0, value)
+                if orig != target:
+                    moves.append((row_idx, orig, row_idx, target, value))
+                j -= 1
+                target -= 1
+        elif j > 0 and tiles[j - 1][0] == -1:
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            if tiles[j - 1][1] != target:
+                moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
+            bomb_destroyed.add((row_idx, target))
+            j -= 2
+        elif j > 0 and value == tiles[j - 1][0] and value > 0:
+            new_value = value * 2
+            new_vals.insert(0, new_value)
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            if tiles[j - 1][1] != target:
+                moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
+            merges.append((row_idx, target, new_value))
+            j -= 2
+            target -= 1
+        else:
+            new_vals.insert(0, value)
+            if orig != target:
+                moves.append((row_idx, orig, row_idx, target, value))
+            j -= 1
+            target -= 1
+    return new_vals
 
-def moveRight(grid, r, c):
+def moveLeft(grid, r, c, frozen=set()):
     moves = []
     merges = []
     bomb_destroyed = set()
 
     for i in range(r):
-        row = [(x, j) for j, x in enumerate(grid[i]) if x != 0]
+        frozen_cols = {fc for fr, fc in frozen if fr == i}
+        segments = _get_segments(c, frozen_cols)
 
-        if not row:
-            continue
-
-        new_row = []
-
-        j = len(row) - 1
-        target_col = c - 1
-        while j >= 0:
-            value, orig_col = row[j]
-
-            if value == -1:
-                if j > 0:
-                    if orig_col != target_col:
-                        moves.append((i, orig_col, i, target_col, value))
-                    if row[j - 1][1] != target_col:
-                        moves.append((i, row[j - 1][1], i, target_col, row[j - 1][0]))
-                    bomb_destroyed.add((i, target_col))
-                    j -= 2
-                else:
-                    new_row.insert(0, value)
-                    if orig_col != target_col:
-                        moves.append((i, orig_col, i, target_col, value))
-                    j -= 1
-                    target_col -= 1
-            elif j > 0 and row[j - 1][0] == -1:
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
-                if row[j - 1][1] != target_col:
-                    moves.append((i, row[j - 1][1], i, target_col, row[j - 1][0]))
-                bomb_destroyed.add((i, target_col))
-                j -= 2
-            elif j > 0 and value == row[j - 1][0] and value > 0:
-                new_value = value * 2
-                new_row.insert(0, new_value)
-
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
-                if row[j - 1][1] != target_col:
-                    moves.append((i, row[j - 1][1], i, target_col, row[j - 1][0]))
-
-                merges.append((i, target_col, new_value))
-                j -= 2
-                target_col -= 1
-            else:
-                new_row.insert(0, value)
-                if orig_col != target_col:
-                    moves.append((i, orig_col, i, target_col, value))
-                j -= 1
-                target_col -= 1
-
-        grid[i] = [0] * (c - len(new_row)) + new_row
+        for seg_start, seg_end in segments:
+            seg_tiles = [(grid[i][j], j) for j in range(seg_start, seg_end) if grid[i][j] != 0]
+            new_vals = _process_segment_left(seg_tiles, i, seg_start, moves, merges, bomb_destroyed) if seg_tiles else []
+            for idx, col in enumerate(range(seg_start, seg_end)):
+                grid[i][col] = new_vals[idx] if idx < len(new_vals) else 0
 
     return moves, merges, bomb_destroyed
 
-def moveUp(grid, r, c):
+def moveRight(grid, r, c, frozen=set()):
     moves = []
     merges = []
     bomb_destroyed = set()
 
-    for col in range(c):
-        column = [(grid[row][col], row) for row in range(r) if grid[row][col] != 0]
+    for i in range(r):
+        frozen_cols = {fc for fr, fc in frozen if fr == i}
+        segments = _get_segments(c, frozen_cols)
 
-        if not column:
-            continue
+        for seg_start, seg_end in segments:
+            seg_tiles = [(grid[i][j], j) for j in range(seg_start, seg_end) if grid[i][j] != 0]
+            new_vals = _process_segment_right(seg_tiles, i, seg_end, moves, merges, bomb_destroyed) if seg_tiles else []
+            seg_len = seg_end - seg_start
+            for idx, col in enumerate(range(seg_start, seg_end)):
+                right_idx = idx - (seg_len - len(new_vals))
+                grid[i][col] = new_vals[right_idx] if right_idx >= 0 else 0
 
-        new_column = []
+    return moves, merges, bomb_destroyed
 
-        i = 0
-        target_row = 0
-        while i < len(column):
-            value, orig_row = column[i]
+def _process_segment_up(tiles, col_idx, seg_start, moves, merges, bomb_destroyed):
+    """Process a segment of tiles compacting up. Returns list of result values."""
+    new_vals = []
+    i = 0
+    target = seg_start
+    while i < len(tiles):
+        value, orig = tiles[i]
 
-            if value == -1:
-                if i < len(column) - 1:
-                    if orig_row != target_row:
-                        moves.append((orig_row, col, target_row, col, value))
-                    if column[i + 1][1] != target_row:
-                        moves.append((column[i + 1][1], col, target_row, col, column[i + 1][0]))
-                    bomb_destroyed.add((target_row, col))
-                    i += 2
-                else:
-                    new_column.append(value)
-                    if orig_row != target_row:
-                        moves.append((orig_row, col, target_row, col, value))
-                    i += 1
-                    target_row += 1
-            elif i < len(column) - 1 and column[i + 1][0] == -1:
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
-                if column[i + 1][1] != target_row:
-                    moves.append((column[i + 1][1], col, target_row, col, column[i + 1][0]))
-                bomb_destroyed.add((target_row, col))
+        if value == -1:
+            if i < len(tiles) - 1:
+                if orig != target:
+                    moves.append((orig, col_idx, target, col_idx, value))
+                if tiles[i + 1][1] != target:
+                    moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
+                bomb_destroyed.add((target, col_idx))
                 i += 2
-            elif i < len(column) - 1 and value == column[i + 1][0] and value > 0:
-                new_value = value * 2
-                new_column.append(new_value)
-
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
-                if column[i + 1][1] != target_row:
-                    moves.append((column[i + 1][1], col, target_row, col, column[i + 1][0]))
-
-                merges.append((target_row, col, new_value))
-                i += 2
-                target_row += 1
             else:
-                new_column.append(value)
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
+                new_vals.append(value)
+                if orig != target:
+                    moves.append((orig, col_idx, target, col_idx, value))
                 i += 1
-                target_row += 1
+                target += 1
+        elif i < len(tiles) - 1 and tiles[i + 1][0] == -1:
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            if tiles[i + 1][1] != target:
+                moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
+            bomb_destroyed.add((target, col_idx))
+            i += 2
+        elif i < len(tiles) - 1 and value == tiles[i + 1][0] and value > 0:
+            new_value = value * 2
+            new_vals.append(new_value)
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            if tiles[i + 1][1] != target:
+                moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
+            merges.append((target, col_idx, new_value))
+            i += 2
+            target += 1
+        else:
+            new_vals.append(value)
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            i += 1
+            target += 1
+    return new_vals
 
-        for row in range(r):
-            grid[row][col] = new_column[row] if row < len(new_column) else 0
+def _process_segment_down(tiles, col_idx, seg_end, moves, merges, bomb_destroyed):
+    """Process a segment of tiles compacting down. Returns list of result values (top to bottom)."""
+    new_vals = []
+    i = len(tiles) - 1
+    target = seg_end - 1
+    while i >= 0:
+        value, orig = tiles[i]
 
-    return moves, merges, bomb_destroyed
+        if value == -1:
+            if i > 0:
+                if orig != target:
+                    moves.append((orig, col_idx, target, col_idx, value))
+                if tiles[i - 1][1] != target:
+                    moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
+                bomb_destroyed.add((target, col_idx))
+                i -= 2
+            else:
+                new_vals.insert(0, value)
+                if orig != target:
+                    moves.append((orig, col_idx, target, col_idx, value))
+                i -= 1
+                target -= 1
+        elif i > 0 and tiles[i - 1][0] == -1:
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            if tiles[i - 1][1] != target:
+                moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
+            bomb_destroyed.add((target, col_idx))
+            i -= 2
+        elif i > 0 and value == tiles[i - 1][0] and value > 0:
+            new_value = value * 2
+            new_vals.insert(0, new_value)
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            if tiles[i - 1][1] != target:
+                moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
+            merges.append((target, col_idx, new_value))
+            i -= 2
+            target -= 1
+        else:
+            new_vals.insert(0, value)
+            if orig != target:
+                moves.append((orig, col_idx, target, col_idx, value))
+            i -= 1
+            target -= 1
+    return new_vals
 
-def moveDown(grid, r, c):
+def moveUp(grid, r, c, frozen=set()):
     moves = []
     merges = []
     bomb_destroyed = set()
 
     for col in range(c):
-        column = [(grid[row][col], row) for row in range(r) if grid[row][col] != 0]
+        frozen_rows = {fr for fr, fc in frozen if fc == col}
+        segments = _get_segments(r, frozen_rows)
 
-        if not column:
-            continue
+        for seg_start, seg_end in segments:
+            seg_tiles = [(grid[row][col], row) for row in range(seg_start, seg_end) if grid[row][col] != 0]
+            new_vals = _process_segment_up(seg_tiles, col, seg_start, moves, merges, bomb_destroyed) if seg_tiles else []
+            for idx, row in enumerate(range(seg_start, seg_end)):
+                grid[row][col] = new_vals[idx] if idx < len(new_vals) else 0
 
-        new_column = []
+    return moves, merges, bomb_destroyed
 
-        i = len(column) - 1
-        target_row = r - 1
-        while i >= 0:
-            value, orig_row = column[i]
+def moveDown(grid, r, c, frozen=set()):
+    moves = []
+    merges = []
+    bomb_destroyed = set()
 
-            if value == -1:
-                if i > 0:
-                    if orig_row != target_row:
-                        moves.append((orig_row, col, target_row, col, value))
-                    if column[i - 1][1] != target_row:
-                        moves.append((column[i - 1][1], col, target_row, col, column[i - 1][0]))
-                    bomb_destroyed.add((target_row, col))
-                    i -= 2
-                else:
-                    new_column.insert(0, value)
-                    if orig_row != target_row:
-                        moves.append((orig_row, col, target_row, col, value))
-                    i -= 1
-                    target_row -= 1
-            elif i > 0 and column[i - 1][0] == -1:
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
-                if column[i - 1][1] != target_row:
-                    moves.append((column[i - 1][1], col, target_row, col, column[i - 1][0]))
-                bomb_destroyed.add((target_row, col))
-                i -= 2
-            elif i > 0 and value == column[i - 1][0] and value > 0:
-                new_value = value * 2
-                new_column.insert(0, new_value)
+    for col in range(c):
+        frozen_rows = {fr for fr, fc in frozen if fc == col}
+        segments = _get_segments(r, frozen_rows)
 
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
-                if column[i - 1][1] != target_row:
-                    moves.append((column[i - 1][1], col, target_row, col, column[i - 1][0]))
+        for seg_start, seg_end in segments:
+            seg_tiles = [(grid[row][col], row) for row in range(seg_start, seg_end) if grid[row][col] != 0]
+            new_vals = _process_segment_down(seg_tiles, col, seg_end, moves, merges, bomb_destroyed) if seg_tiles else []
+            seg_len = seg_end - seg_start
+            for idx, row in enumerate(range(seg_start, seg_end)):
+                down_idx = idx - (seg_len - len(new_vals))
+                grid[row][col] = new_vals[down_idx] if down_idx >= 0 else 0
 
-                merges.append((target_row, col, new_value))
-                i -= 2
-                target_row -= 1
-            else:
-                new_column.insert(0, value)
-                if orig_row != target_row:
-                    moves.append((orig_row, col, target_row, col, value))
-                i -= 1
-                target_row -= 1
-
-        for row in range(r):
-            grid[row][col] = (
-                new_column[row - (r - len(new_column))] if row >= r - len(new_column) else 0
-            )
+    return moves, merges, bomb_destroyed
 
     return moves, merges, bomb_destroyed
 
@@ -610,6 +636,7 @@ def start_grid_expansion(g):
     g.grid_expanding = True
     g.expand_progress = 0
 
+    g.pending_shop = True
     print(f"Grid expanded to {g.rows}x{g.cols}! (direction: {g.expand_direction})")
 
 def process_move(g, direction):
@@ -618,17 +645,22 @@ def process_move(g, direction):
 
     grid_before = g.playingGrid.copy()
 
+    frozen = g.frozen_tiles.copy()
+
     if direction == "up":
-        moves, merges, bomb_destroyed = moveUp(g.playingGrid, g.rows, g.cols)
+        moves, merges, bomb_destroyed = moveUp(g.playingGrid, g.rows, g.cols, frozen)
     elif direction == "down":
-        moves, merges, bomb_destroyed = moveDown(g.playingGrid, g.rows, g.cols)
+        moves, merges, bomb_destroyed = moveDown(g.playingGrid, g.rows, g.cols, frozen)
     elif direction == "left":
-        moves, merges, bomb_destroyed = moveLeft(g.playingGrid, g.rows, g.cols)
+        moves, merges, bomb_destroyed = moveLeft(g.playingGrid, g.rows, g.cols, frozen)
     elif direction == "right":
-        moves, merges, bomb_destroyed = moveRight(g.playingGrid, g.rows, g.cols)
+        moves, merges, bomb_destroyed = moveRight(g.playingGrid, g.rows, g.cols, frozen)
 
     if np.array_equal(grid_before, g.playingGrid):
         return
+
+    # Freeze wears off after one move
+    g.frozen_tiles.clear()
 
     points_gained = sum(value for _, _, value in merges)
 
@@ -663,6 +695,9 @@ def update_animations(g, dt):
         if g.expand_progress >= 1.0:
             g.grid_expanding = False
             g.expand_progress = 0
+            if g.pending_shop:
+                g.pending_shop = False
+                g.shop_open = True
         return
 
     if not g.animating:
@@ -729,8 +764,8 @@ def draw_tile(g, r, c, value, scale=1.0, alpha=255):
 
     g.render_surface.blit(tile_surface, (x + offset, y + offset))
 
-def draw_button(g, x, y, width, height, text, cost, can_afford, active=False):
-    if can_afford and not active:
+def draw_button(g, x, y, width, height, text, charges, enabled, active=False):
+    if enabled and not active:
         color = "#81a1c1"
         hover_color = "#88c0d0"
     elif active:
@@ -759,23 +794,39 @@ def draw_button(g, x, y, width, height, text, cost, can_afford, active=False):
     g.render_surface.blit(button_text, text_rect)
 
     if not active:
-        cost_color = "#a3be8c" if can_afford else "#bf616a"
-        cost_text = g.small_font.render(f"Cost: {cost}", True, cost_color)
-        cost_rect = cost_text.get_rect(center=(x + width//2, y + 2*height//3))
-        g.render_surface.blit(cost_text, cost_rect)
+        charge_color = "#a3be8c" if charges > 0 else "#bf616a"
+        charge_text = g.small_font.render(f"Charges: {charges}", True, charge_color)
+        charge_rect = charge_text.get_rect(center=(x + width//2, y + 2*height//3))
+        g.render_surface.blit(charge_text, charge_rect)
 
-    return is_hover and can_afford and not active
+    return is_hover and enabled and not active
 
 def handle_button_click(g, mouse_pos):
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
     mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
 
-    button_y = g.menu_y + 30
-    if g.button_x <= mouse_x <= g.button_x + g.button_width and button_y <= mouse_y <= button_y + g.button_height:
-        if g.points >= g.bomb_ability_cost and not g.selecting_bomb_position:
-            g.points -= g.bomb_ability_cost
+    # Match the two-button layout computed in main.py
+    button_gap = 20
+    total_w = g.button_width * 2 + button_gap
+    btn_left_x = g.start_x + (g.grid_width - total_w) // 2
+    btn_right_x = btn_left_x + g.button_width + button_gap
+    btn_y = g.menu_y + 30
+
+    # Bomb button (left)
+    if btn_left_x <= mouse_x <= btn_left_x + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
+        if g.abilities[0]['charges'] > 0 and not g.selecting_bomb_position and not g.selecting_freeze_position:
+            g.abilities[0]['charges'] -= 1
             g.selecting_bomb_position = True
-            print(f"Bomb ability activated! Click an empty tile to place the bomb. Score: {g.points}")
+            print(f"Bomb ability activated! Charges remaining: {g.abilities[0]['charges']}")
+        return
+
+    # Freeze button (right)
+    if btn_right_x <= mouse_x <= btn_right_x + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
+        if g.abilities[1]['charges'] > 0 and not g.selecting_freeze_position and not g.selecting_bomb_position:
+            g.abilities[1]['charges'] -= 1
+            g.selecting_freeze_position = True
+            print(f"Freeze ability activated! Charges remaining: {g.abilities[1]['charges']}")
+        return
 
 def get_tile_from_mouse(g, mouse_pos):
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
@@ -801,6 +852,154 @@ def place_bomb_at_tile(g, r, c):
         g.new_tile_scale = 0
 
         print(f"Bomb placed at position ({r}, {c})")
+
+def place_freeze_on_tile(g, r, c):
+    if g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
+        g.frozen_tiles.add((r, c))
+        g.selecting_freeze_position = False
+        print(f"Tile at ({r}, {c}) frozen for 1 turn")
+
+def draw_shop(g):
+    """Render the shop popup panel with semi-transparent overlay."""
+    # Semi-transparent dark overlay
+    overlay = pygame.Surface((g.RENDER_WIDTH, g.RENDER_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    g.render_surface.blit(overlay, (0, 0))
+
+    # Panel dimensions
+    panel_w, panel_h = 800, 600
+    panel_x = (g.RENDER_WIDTH - panel_w) // 2
+    panel_y = (g.RENDER_HEIGHT - panel_h) // 2
+
+    # Panel background
+    pygame.draw.rect(g.render_surface, "#3b4252", (panel_x, panel_y, panel_w, panel_h))
+    pygame.draw.rect(g.render_surface, "#d8dee9", (panel_x, panel_y, panel_w, panel_h), 3)
+
+    # Title
+    title = g.font.render("SHOP", True, "#eceff4")
+    title_rect = title.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 40))
+    g.render_surface.blit(title, title_rect)
+
+    # Score display
+    score_text = g.small_font.render(f"Score: {g.points}", True, "#a3be8c")
+    score_rect = score_text.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 80))
+    g.render_surface.blit(score_text, score_rect)
+
+    # Ability rows
+    row_y_start = panel_y + 130
+    row_height = 80
+
+    # Get mouse position in render coordinates for hover effects
+    mouse_pos = pygame.mouse.get_pos()
+    mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
+    mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
+
+    for i, ability in enumerate(g.abilities):
+        y = row_y_start + i * row_height
+
+        # Ability name + description
+        name_text = g.font.render(ability['name'], True, "#eceff4")
+        g.render_surface.blit(name_text, (panel_x + 30, y))
+        desc_text = g.small_font.render(ability['description'], True, "#d8dee9")
+        g.render_surface.blit(desc_text, (panel_x + 30, y + 32))
+
+        # Cost per charge
+        cost_text = g.small_font.render(f"{ability['cost']}pts ea.", True, "#88c0d0")
+        g.render_surface.blit(cost_text, (panel_x + 350, y + 10))
+
+        # - button
+        btn_size = 40
+        minus_x = panel_x + 560
+        btn_y = y + 10
+
+        minus_hover = minus_x <= mouse_x <= minus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size
+        minus_color = "#bf616a" if minus_hover and ability['charges'] > 0 else "#4c566a"
+        pygame.draw.rect(g.render_surface, minus_color, (minus_x, btn_y, btn_size, btn_size))
+        pygame.draw.rect(g.render_surface, "#d8dee9", (minus_x, btn_y, btn_size, btn_size), 2)
+        minus_text = g.font.render("-", True, "#eceff4")
+        minus_rect = minus_text.get_rect(center=(minus_x + btn_size // 2, btn_y + btn_size // 2))
+        g.render_surface.blit(minus_text, minus_rect)
+
+        # Charges count
+        qty_text = g.font.render(str(ability['charges']), True, "#eceff4")
+        qty_rect = qty_text.get_rect(center=(minus_x + btn_size + 35, btn_y + btn_size // 2))
+        g.render_surface.blit(qty_text, qty_rect)
+
+        # + button
+        plus_x = minus_x + btn_size + 70
+        can_add = g.points >= ability['cost']
+
+        plus_hover = plus_x <= mouse_x <= plus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size
+        plus_color = "#a3be8c" if plus_hover and can_add else "#4c566a"
+        pygame.draw.rect(g.render_surface, plus_color, (plus_x, btn_y, btn_size, btn_size))
+        pygame.draw.rect(g.render_surface, "#d8dee9", (plus_x, btn_y, btn_size, btn_size), 2)
+        plus_text = g.font.render("+", True, "#eceff4")
+        plus_rect = plus_text.get_rect(center=(plus_x + btn_size // 2, btn_y + btn_size // 2))
+        g.render_surface.blit(plus_text, plus_rect)
+
+    # Divider line
+    div_y = panel_y + panel_h - 100
+    pygame.draw.line(g.render_surface, "#d8dee9", (panel_x + 30, div_y), (panel_x + panel_w - 30, div_y), 2)
+
+    # DONE button (centered)
+    done_w, done_h = 160, 50
+    done_x = (g.RENDER_WIDTH - done_w) // 2
+    done_y = div_y + 25
+
+    done_hover = done_x <= mouse_x <= done_x + done_w and done_y <= mouse_y <= done_y + done_h
+    done_color = "#a3be8c" if done_hover else "#5e81ac"
+    pygame.draw.rect(g.render_surface, done_color, (done_x, done_y, done_w, done_h))
+    pygame.draw.rect(g.render_surface, "#d8dee9", (done_x, done_y, done_w, done_h), 2)
+    done_text = g.font.render("DONE", True, "#eceff4")
+    done_rect = done_text.get_rect(center=(done_x + done_w // 2, done_y + done_h // 2))
+    g.render_surface.blit(done_text, done_rect)
+
+    # Store layout info for click handling
+    g._shop_layout = {
+        'row_y_start': row_y_start, 'row_height': row_height,
+        'btn_size': btn_size, 'minus_x': minus_x,
+        'plus_x_offset': btn_size + 70,
+        'done_rect': (done_x, done_y, done_w, done_h),
+    }
+
+
+def handle_shop_click(g, mouse_pos):
+    """Process clicks in the shop panel. +/- apply immediately."""
+    mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
+    mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
+
+    layout = getattr(g, '_shop_layout', None)
+    if not layout:
+        return
+
+    btn_size = layout['btn_size']
+    minus_x = layout['minus_x']
+
+    for i, ability in enumerate(g.abilities):
+        btn_y = layout['row_y_start'] + i * layout['row_height'] + 10
+
+        # Minus button — refund a charge
+        if minus_x <= mouse_x <= minus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size:
+            if ability['charges'] > 0:
+                ability['charges'] -= 1
+                g.points += ability['cost']
+            return
+
+        # Plus button — buy a charge immediately
+        plus_x = minus_x + layout['plus_x_offset']
+        if plus_x <= mouse_x <= plus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size:
+            if g.points >= ability['cost']:
+                g.points -= ability['cost']
+                ability['charges'] += 1
+            return
+
+    # Done button
+    dx, dy, dw, dh = layout['done_rect']
+    if dx <= mouse_x <= dx + dw and dy <= mouse_y <= dy + dh:
+        g.shop_open = False
+        print(f"Shop closed. Score: {g.points}")
+        return
+
 
 def render_to_opengl(g):
     texture_data = pygame.image.tostring(g.render_surface, 'RGB', True)

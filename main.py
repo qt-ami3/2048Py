@@ -1,4 +1,5 @@
 #   shaders from libretro/gist-shaders
+#   never declare functions in main
 
 import pygame
 import numpy as np
@@ -99,15 +100,21 @@ func.newNum(g.playingGrid)
 g.playingGridLast = g.playingGrid.copy()
 
 # Score tracking - start with initial tiles
-g.points = sum(sum(g.playingGrid))
+g.points = 4500
 
 # Ability system
-g.bomb_ability_cost = 750
-g.bomb_ability_active = False
-g.next_tile_is_bomb = False
+g.abilities = [
+    {'name': 'Bomb', 'cost': 750, 'charges': 0, 'description': 'Destroy a tile'},
+    {'name': 'Freeze', 'cost': 500, 'charges': 0, 'description': 'Hold tile 1 turn'},
+]
 g.selecting_bomb_position = False
+g.selecting_freeze_position = False
+g.frozen_tiles = set()
 g.hovered_tile = None
 g.bomb_image = None
+# Shop state
+g.shop_open = True  # Start with shop open
+g.pending_shop = False
 try:
     g.bomb_image = pygame.image.load("assets/sprites/bomb.png")
     bomb_size = int(g.square_size * g.ui_config['bomb_scale'])
@@ -186,6 +193,17 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
+        # Shop intercepts all input when open
+        if g.shop_open:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                func.handle_shop_click(g, event.pos)
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    g.shop_open = False
+                elif event.key == pygame.K_F11:
+                    func.toggle_fullscreen(g)
+            continue
+
         if event.type == pygame.KEYDOWN and not g.animating and not g.grid_expanding:
             match event.key:
                 case pygame.K_UP:
@@ -199,15 +217,19 @@ while running:
                 case pygame.K_ESCAPE:
                     if g.selecting_bomb_position:
                         g.selecting_bomb_position = False
-                        g.points += g.bomb_ability_cost
-                        print("Bomb placement cancelled. Points refunded.")
+                        g.abilities[0]['charges'] += 1
+                        print("Bomb placement cancelled. Charge refunded.")
+                    elif g.selecting_freeze_position:
+                        g.selecting_freeze_position = False
+                        g.abilities[1]['charges'] += 1
+                        print("Freeze cancelled. Charge refunded.")
                     else:
                         running = False
                 case pygame.K_F11:
                     func.toggle_fullscreen(g)
 
         if event.type == pygame.MOUSEMOTION:
-            if g.selecting_bomb_position:
+            if g.selecting_bomb_position or g.selecting_freeze_position:
                 g.hovered_tile = func.get_tile_from_mouse(g, event.pos)
 
         if event.type == pygame.MOUSEBUTTONDOWN and not g.animating and not g.grid_expanding:
@@ -217,6 +239,11 @@ while running:
                     if tile:
                         r, c = tile
                         func.place_bomb_at_tile(g, r, c)
+                elif g.selecting_freeze_position:
+                    tile = func.get_tile_from_mouse(g, event.pos)
+                    if tile:
+                        r, c = tile
+                        func.place_freeze_on_tile(g, r, c)
                 else:
                     func.handle_button_click(g, event.pos)
 
@@ -257,6 +284,9 @@ while running:
 
             if g.selecting_bomb_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] == 0:
                 pygame.draw.rect(g.render_surface, "#a3be8c", (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, "#d8dee9", (x, y, g.square_size, g.square_size), 4)
+            elif g.selecting_freeze_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
+                pygame.draw.rect(g.render_surface, "#88c0d0", (x, y, g.square_size, g.square_size))
                 pygame.draw.rect(g.render_surface, "#d8dee9", (x, y, g.square_size, g.square_size), 4)
             elif is_new_cell:
                 # New cell stretches/fades in during expansion
@@ -321,6 +351,15 @@ while running:
                 offset = (g.square_size - surface.get_width()) / 2
                 g.render_surface.blit(surface, (x + offset, y + offset))
 
+    # Draw frozen tile overlay (blue tint)
+    for (fr, fc) in g.frozen_tiles:
+        if 0 <= fr < g.rows and 0 <= fc < g.cols and g.playingGrid[fr][fc] != 0:
+            fx = g.start_x + fc * g.square_size
+            fy = g.start_y + fr * g.square_size
+            tint = pygame.Surface((g.square_size, g.square_size), pygame.SRCALPHA)
+            tint.fill((100, 160, 220, 80))
+            g.render_surface.blit(tint, (fx, fy))
+
     # Restore start positions after expansion animation drawing
     if g.grid_expanding:
         g.start_x, g.start_y = _expand_real_sx, _expand_real_sy
@@ -329,14 +368,33 @@ while running:
         instruction_text = g.small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
         instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
         g.render_surface.blit(instruction_text, instruction_rect)
+    elif g.selecting_freeze_position:
+        instruction_text = g.small_font.render("Click a number tile to freeze it (ESC to cancel)", True, "#88c0d0")
+        instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
+        g.render_surface.blit(instruction_text, instruction_rect)
     else:
         menu_title = g.font.render("ABILITIES", True, "#eceff4")
         menu_title_rect = menu_title.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y))
         g.render_surface.blit(menu_title, menu_title_rect)
 
-    can_afford = g.points >= g.bomb_ability_cost
-    func.draw_button(g, g.button_x, g.menu_y + 30, g.button_width, g.button_height,
-                "Bomb Tile", g.bomb_ability_cost, can_afford, g.selecting_bomb_position)
+    # Draw two ability buttons side by side
+    button_gap = 20
+    total_w = g.button_width * 2 + button_gap
+    btn_left_x = g.start_x + (g.grid_width - total_w) // 2
+    btn_right_x = btn_left_x + g.button_width + button_gap
+    btn_y = g.menu_y + 30
+
+    bomb = g.abilities[0]
+    func.draw_button(g, btn_left_x, btn_y, g.button_width, g.button_height,
+                "Bomb Tile", bomb['charges'], bomb['charges'] > 0, g.selecting_bomb_position)
+
+    freeze = g.abilities[1]
+    func.draw_button(g, btn_right_x, btn_y, g.button_width, g.button_height,
+                "Freeze", freeze['charges'], freeze['charges'] > 0, g.selecting_freeze_position)
+
+    # Draw shop overlay on top of everything
+    if g.shop_open:
+        func.draw_shop(g)
 
     # Render to OpenGL with CRT shader
     func.render_to_opengl(g)
