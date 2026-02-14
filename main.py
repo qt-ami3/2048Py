@@ -125,20 +125,26 @@ COLORS = {
 
 # CRT effect variables
 crt_surface = pygame.Surface((screen_width, screen_height))
-scanline_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-vignette_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
 
-# Create scanlines
-for y in range(0, screen_height, 3):
-    pygame.draw.line(scanline_surface, (0, 0, 0, 40), (0, y), (screen_width, y), 1)
+def create_scanline_surface(width, height):
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    for y in range(0, height, 3):
+        pygame.draw.line(surface, (0, 0, 0, 40), (0, y), (width, y), 1)
+    return surface
 
-# Create vignette effect
-for i in range(255):
-    alpha = int((i / 255) ** 2 * 120)
-    distance_x = int(i * screen_width / 255 / 2)
-    distance_y = int(i * screen_height / 255 / 2)
-    pygame.draw.rect(vignette_surface, (0, 0, 0, alpha), 
-                     (distance_x, distance_y, screen_width - distance_x * 2, screen_height - distance_y * 2), 1)
+def create_vignette_surface(width, height):
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    for i in range(255):
+        alpha = int((i / 255) ** 2 * 120)
+        distance_x = int(i * width / 255 / 2)
+        distance_y = int(i * height / 255 / 2)
+        pygame.draw.rect(surface, (0, 0, 0, alpha),
+                         (distance_x, distance_y, width - distance_x * 2, height - distance_y * 2), 1)
+    return surface
+
+# Create at display resolution so they survive scaling
+scanline_surface = create_scanline_surface(display_width, display_height)
+vignette_surface = create_vignette_surface(display_width, display_height)
 
 def get_tile_color(value):
     return COLORS.get(value, "#2e3440")
@@ -207,17 +213,19 @@ def prepare_tile_surface(value, scale):
     return surface
 
 def toggle_fullscreen():
-    """Toggle between fullscreen and windowed mode"""
-    global is_fullscreen, screen, display_width, display_height
-    
+    global is_fullscreen, screen, display_width, display_height, scanline_surface, vignette_surface
+
     is_fullscreen = not is_fullscreen
-    
+
     if is_fullscreen:
         screen = pygame.display.set_mode((NATIVE_WIDTH, NATIVE_HEIGHT), pygame.FULLSCREEN)
         display_width, display_height = NATIVE_WIDTH, NATIVE_HEIGHT
     else:
         screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         display_width, display_height = WINDOW_WIDTH, WINDOW_HEIGHT
+
+    scanline_surface = create_scanline_surface(display_width, display_height)
+    vignette_surface = create_vignette_surface(display_width, display_height)
 
 def start_grid_expansion():
     global rows, cols, playingGrid, playingGridLast, grid_width, grid_height
@@ -659,30 +667,25 @@ while running: # game logic game loop
     
     # Apply CRT effects on render surface
     crt_surface.blit(render_surface, (0, 0))
-    
-    # 2. Add slight glow/bloom effect
+
+    # Add slight glow/bloom effect
     glow_surface = crt_surface.copy()
     glow_surface.set_alpha(30)
     render_surface.blit(glow_surface, (2, 2))
     render_surface.blit(glow_surface, (-2, -2))
-    
-    # 3. Apply scanlines
-    render_surface.blit(scanline_surface, (0, 0))
-    
-    # 4. Apply vignette
-    render_surface.blit(vignette_surface, (0, 0))
-    
-    # 5. Add slight RGB shift for chromatic aberration
-    if animating:  # Add subtle shift during animations
+
+    # Add slight RGB shift for chromatic aberration
+    if animating:
         shift_amount = int(abs(np.sin(animation_progress * np.pi)) * 2)
         if shift_amount > 0:
-            # Red channel shift
             red_surface = render_surface.copy()
             red_surface.set_alpha(100)
             render_surface.blit(red_surface, (shift_amount, 0))
-    
-    # Scale up the render surface to current display resolution and show
+
+    # Scale to display resolution, then apply scanlines and vignette at display res
     pygame.transform.scale(render_surface, (display_width, display_height), screen)
+    screen.blit(scanline_surface, (0, 0))
+    screen.blit(vignette_surface, (0, 0))
     pygame.display.flip()
 
 
