@@ -2,13 +2,9 @@
 
 With the latest changes; the moderngl version of the game should run at a playable framerate.
 
-![fullscreen 2048 game rendered at lower then native with vcr effect](images/sampleOne.png)
-![windowed 2048 game with vcr effect and window opacity](images/sampleTwo.png)
-![bomb example 1/3](images/sampleThree.png)
-![bomb example 2/3](images/sampleFour.png)
-![bomb example 3/3](images/sampleFive.png)
-![second shader using moderngl](images/sampleSix.png)
-![new row generated after hitting 2048](images/sampleSeven.png)
+![](images/sampleOne.png)
+![](images/sampleTwo.png)
+![](images/sampleThree.png)
 
 ## run:
 
