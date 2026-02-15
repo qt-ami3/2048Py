@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.15)
+project(game2048_engine)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(pybind11 REQUIRED)
+
+pybind11_add_module(game2048_engine
+    src/bindings.cpp
+    src/tile.cpp
+    src/board.cpp
+    src/passive.cpp
+    src/movement.cpp
+    src/game_engine.cpp
+    src/passive_roller.cpp
+    src/slow_mover.cpp
+)
+
+target_include_directories(game2048_engine PRIVATE include)
+
+install(TARGETS game2048_engine DESTINATION ${CMAKE_SOURCE_DIR}/..)

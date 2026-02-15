@@ -2,6 +2,7 @@ import random as rand
 import numpy as np
 import pygame
 import moderngl
+import game2048_engine as engine
 
 # Color schemes for different expansion levels
 DEFAULT_COLORS = {
@@ -149,13 +150,6 @@ _color_transition = {
 }
 
 def get_color_scheme_for_expansion(tar_expand):
-    """Return the appropriate color scheme based on expansion target.
-
-    - tarExpand = 2048: Gruvbox (start)
-    - tarExpand = 4096 (achieved 2048): Nord
-    - tarExpand = 8192 (achieved 4096): Tokyo Night
-    - tarExpand > 8192 (achieved 8192+): Tokyo Night
-    """
     if tar_expand > 4096:
         return TOKYO_NIGHT_COLORS, TOKYO_NIGHT_UI
     elif tar_expand > 2048:
@@ -367,314 +361,12 @@ void main() {
 }
 '''
 
-# --- Game logic functions ---
-
-def newNum(grid, excluded=None):
-    empty = list(zip(*np.where(grid == 0)))
-    if excluded:
-        empty = [(r, c) for r, c in empty if (r, c) not in excluded]
-    if empty:
-        r, c = rand.choice(empty)
-        grid[r][c] = 2
-        return (r, c)
-    return None
-
-def newBomb(grid):
-    """Spawn a bomb tile (-1) instead of a regular tile"""
-    empty = list(zip(*np.where(grid == 0)))
-    if empty:
-        r, c = rand.choice(empty)
-        grid[r][c] = -1
-        return (r, c)
-    return None
-
-def _get_segments(size, frozen_positions):
-    """Split a range into segments separated by frozen positions."""
-    segments = []
-    seg_start = None
-    for idx in range(size):
-        if idx in frozen_positions:
-            if seg_start is not None:
-                segments.append((seg_start, idx))
-                seg_start = None
-        else:
-            if seg_start is None:
-                seg_start = idx
-    if seg_start is not None:
-        segments.append((seg_start, size))
-    return segments
-
-def _process_segment_left(tiles, row_idx, seg_start, moves, merges, bomb_destroyed):
-    """Process a segment of tiles compacting left. Returns list of result values."""
-    new_vals = []
-    j = 0
-    target = seg_start
-    while j < len(tiles):
-        value, orig = tiles[j]
-
-        if value == -1:
-            if j < len(tiles) - 1:
-                if orig != target:
-                    moves.append((row_idx, orig, row_idx, target, value))
-                if tiles[j + 1][1] != target:
-                    moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
-                bomb_destroyed.add((row_idx, target))
-                j += 2
-            else:
-                new_vals.append(value)
-                if orig != target:
-                    moves.append((row_idx, orig, row_idx, target, value))
-                j += 1
-                target += 1
-        elif j < len(tiles) - 1 and tiles[j + 1][0] == -1:
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            if tiles[j + 1][1] != target:
-                moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
-            bomb_destroyed.add((row_idx, target))
-            j += 2
-        elif j < len(tiles) - 1 and value == tiles[j + 1][0] and value > 0:
-            new_value = value * 2
-            new_vals.append(new_value)
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            if tiles[j + 1][1] != target:
-                moves.append((row_idx, tiles[j + 1][1], row_idx, target, tiles[j + 1][0]))
-            merges.append((row_idx, target, new_value))
-            j += 2
-            target += 1
-        else:
-            new_vals.append(value)
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            j += 1
-            target += 1
-    return new_vals
-
-def _process_segment_right(tiles, row_idx, seg_end, moves, merges, bomb_destroyed):
-    """Process a segment of tiles compacting right. Returns list of result values (left to right)."""
-    new_vals = []
-    j = len(tiles) - 1
-    target = seg_end - 1
-    while j >= 0:
-        value, orig = tiles[j]
-
-        if value == -1:
-            if j > 0:
-                if orig != target:
-                    moves.append((row_idx, orig, row_idx, target, value))
-                if tiles[j - 1][1] != target:
-                    moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
-                bomb_destroyed.add((row_idx, target))
-                j -= 2
-            else:
-                new_vals.insert(0, value)
-                if orig != target:
-                    moves.append((row_idx, orig, row_idx, target, value))
-                j -= 1
-                target -= 1
-        elif j > 0 and tiles[j - 1][0] == -1:
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            if tiles[j - 1][1] != target:
-                moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
-            bomb_destroyed.add((row_idx, target))
-            j -= 2
-        elif j > 0 and value == tiles[j - 1][0] and value > 0:
-            new_value = value * 2
-            new_vals.insert(0, new_value)
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            if tiles[j - 1][1] != target:
-                moves.append((row_idx, tiles[j - 1][1], row_idx, target, tiles[j - 1][0]))
-            merges.append((row_idx, target, new_value))
-            j -= 2
-            target -= 1
-        else:
-            new_vals.insert(0, value)
-            if orig != target:
-                moves.append((row_idx, orig, row_idx, target, value))
-            j -= 1
-            target -= 1
-    return new_vals
-
-def moveLeft(grid, r, c, frozen=set()):
-    moves = []
-    merges = []
-    bomb_destroyed = set()
-
-    for i in range(r):
-        frozen_cols = {fc for fr, fc in frozen if fr == i}
-        segments = _get_segments(c, frozen_cols)
-
-        for seg_start, seg_end in segments:
-            seg_tiles = [(grid[i][j], j) for j in range(seg_start, seg_end) if grid[i][j] != 0]
-            new_vals = _process_segment_left(seg_tiles, i, seg_start, moves, merges, bomb_destroyed) if seg_tiles else []
-            for idx, col in enumerate(range(seg_start, seg_end)):
-                grid[i][col] = new_vals[idx] if idx < len(new_vals) else 0
-
-    return moves, merges, bomb_destroyed
-
-def moveRight(grid, r, c, frozen=set()):
-    moves = []
-    merges = []
-    bomb_destroyed = set()
-
-    for i in range(r):
-        frozen_cols = {fc for fr, fc in frozen if fr == i}
-        segments = _get_segments(c, frozen_cols)
-
-        for seg_start, seg_end in segments:
-            seg_tiles = [(grid[i][j], j) for j in range(seg_start, seg_end) if grid[i][j] != 0]
-            new_vals = _process_segment_right(seg_tiles, i, seg_end, moves, merges, bomb_destroyed) if seg_tiles else []
-            seg_len = seg_end - seg_start
-            for idx, col in enumerate(range(seg_start, seg_end)):
-                right_idx = idx - (seg_len - len(new_vals))
-                grid[i][col] = new_vals[right_idx] if right_idx >= 0 else 0
-
-    return moves, merges, bomb_destroyed
-
-def _process_segment_up(tiles, col_idx, seg_start, moves, merges, bomb_destroyed):
-    """Process a segment of tiles compacting up. Returns list of result values."""
-    new_vals = []
-    i = 0
-    target = seg_start
-    while i < len(tiles):
-        value, orig = tiles[i]
-
-        if value == -1:
-            if i < len(tiles) - 1:
-                if orig != target:
-                    moves.append((orig, col_idx, target, col_idx, value))
-                if tiles[i + 1][1] != target:
-                    moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
-                bomb_destroyed.add((target, col_idx))
-                i += 2
-            else:
-                new_vals.append(value)
-                if orig != target:
-                    moves.append((orig, col_idx, target, col_idx, value))
-                i += 1
-                target += 1
-        elif i < len(tiles) - 1 and tiles[i + 1][0] == -1:
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            if tiles[i + 1][1] != target:
-                moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
-            bomb_destroyed.add((target, col_idx))
-            i += 2
-        elif i < len(tiles) - 1 and value == tiles[i + 1][0] and value > 0:
-            new_value = value * 2
-            new_vals.append(new_value)
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            if tiles[i + 1][1] != target:
-                moves.append((tiles[i + 1][1], col_idx, target, col_idx, tiles[i + 1][0]))
-            merges.append((target, col_idx, new_value))
-            i += 2
-            target += 1
-        else:
-            new_vals.append(value)
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            i += 1
-            target += 1
-    return new_vals
-
-def _process_segment_down(tiles, col_idx, seg_end, moves, merges, bomb_destroyed):
-    """Process a segment of tiles compacting down. Returns list of result values (top to bottom)."""
-    new_vals = []
-    i = len(tiles) - 1
-    target = seg_end - 1
-    while i >= 0:
-        value, orig = tiles[i]
-
-        if value == -1:
-            if i > 0:
-                if orig != target:
-                    moves.append((orig, col_idx, target, col_idx, value))
-                if tiles[i - 1][1] != target:
-                    moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
-                bomb_destroyed.add((target, col_idx))
-                i -= 2
-            else:
-                new_vals.insert(0, value)
-                if orig != target:
-                    moves.append((orig, col_idx, target, col_idx, value))
-                i -= 1
-                target -= 1
-        elif i > 0 and tiles[i - 1][0] == -1:
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            if tiles[i - 1][1] != target:
-                moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
-            bomb_destroyed.add((target, col_idx))
-            i -= 2
-        elif i > 0 and value == tiles[i - 1][0] and value > 0:
-            new_value = value * 2
-            new_vals.insert(0, new_value)
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            if tiles[i - 1][1] != target:
-                moves.append((tiles[i - 1][1], col_idx, target, col_idx, tiles[i - 1][0]))
-            merges.append((target, col_idx, new_value))
-            i -= 2
-            target -= 1
-        else:
-            new_vals.insert(0, value)
-            if orig != target:
-                moves.append((orig, col_idx, target, col_idx, value))
-            i -= 1
-            target -= 1
-    return new_vals
-
-def moveUp(grid, r, c, frozen=set()):
-    moves = []
-    merges = []
-    bomb_destroyed = set()
-
-    for col in range(c):
-        frozen_rows = {fr for fr, fc in frozen if fc == col}
-        segments = _get_segments(r, frozen_rows)
-
-        for seg_start, seg_end in segments:
-            seg_tiles = [(grid[row][col], row) for row in range(seg_start, seg_end) if grid[row][col] != 0]
-            new_vals = _process_segment_up(seg_tiles, col, seg_start, moves, merges, bomb_destroyed) if seg_tiles else []
-            for idx, row in enumerate(range(seg_start, seg_end)):
-                grid[row][col] = new_vals[idx] if idx < len(new_vals) else 0
-
-    return moves, merges, bomb_destroyed
-
-def moveDown(grid, r, c, frozen=set()):
-    moves = []
-    merges = []
-    bomb_destroyed = set()
-
-    for col in range(c):
-        frozen_rows = {fr for fr, fc in frozen if fc == col}
-        segments = _get_segments(r, frozen_rows)
-
-        for seg_start, seg_end in segments:
-            seg_tiles = [(grid[row][col], row) for row in range(seg_start, seg_end) if grid[row][col] != 0]
-            new_vals = _process_segment_down(seg_tiles, col, seg_end, moves, merges, bomb_destroyed) if seg_tiles else []
-            seg_len = seg_end - seg_start
-            for idx, row in enumerate(range(seg_start, seg_end)):
-                down_idx = idx - (seg_len - len(new_vals))
-                grid[row][col] = new_vals[down_idx] if down_idx >= 0 else 0
-
-    return moves, merges, bomb_destroyed
-
-    return moves, merges, bomb_destroyed
-
 # --- Utility functions ---
 
 def get_tile_color(value):
-    """Get color for a tile value, with fallback for undefined values."""
     if value in COLORS:
         return COLORS[value]
-    # For values not explicitly defined, use a gradient based on magnitude
     if value > 0:
-        # Cycle through available colors for high values
         keys = sorted([k for k in COLORS.keys() if k > 0 and k != -1])
         if keys:
             idx = len([k for k in keys if k <= value]) % len(keys)
@@ -682,12 +374,9 @@ def get_tile_color(value):
     return COLORS.get(0, "#2e3440")
 
 def update_color_scheme(g):
-    """Update the color scheme based on current expansion target and start transition."""
-    new_colors, new_ui_colors = get_color_scheme_for_expansion(g.tarExpand)
+    new_colors, new_ui_colors = get_color_scheme_for_expansion(g.engine.tar_expand())
 
-    # Only update if colors actually changed
     if COLORS != new_colors:
-        # Start color transition
         _color_transition['active'] = True
         _color_transition['progress'] = 0.0
         _color_transition['old_colors'] = {**COLORS}
@@ -695,7 +384,6 @@ def update_color_scheme(g):
         _color_transition['old_ui_colors'] = {**UI_COLORS}
         _color_transition['new_ui_colors'] = new_ui_colors
 
-        # Determine which scheme we're switching to
         scheme_name = "Unknown"
         if new_colors == GRUVBOX_COLORS:
             scheme_name = "Gruvbox"
@@ -713,20 +401,14 @@ def ease_out_cubic(t):
     return 1 - pow(1 - t, 3)
 
 def lerp_color(color1, color2, t):
-    """Interpolate between two hex colors."""
-    # Convert hex to RGB
     c1 = pygame.Color(color1)
     c2 = pygame.Color(color2)
-
-    # Interpolate each channel
     r = int(lerp(c1.r, c2.r, t))
     g = int(lerp(c1.g, c2.g, t))
     b = int(lerp(c1.b, c2.b, t))
-
-    # Convert back to hex
     return f"#{r:02x}{g:02x}{b:02x}"
 
-# --- UI / rendering functions (all take game state `g` as first param) ---
+# --- UI / rendering functions ---
 
 def recalculate_positions(g):
     g.grid_width = g.cols * g.square_size
@@ -757,7 +439,6 @@ def init_tile_cache(g):
 
 def get_cached_score(g, score_value):
     text = f"Score: {score_value}"
-    # Invalidate cache if text changed OR if in color transition
     if g._score_cache['text'] != text or _color_transition['active']:
         g._score_cache['text'] = text
         g._score_cache['surface'] = g.font.render(text, True, UI_COLORS['text'])
@@ -797,6 +478,51 @@ def toggle_fullscreen(g):
     g.ctx = moderngl.create_context()
     g.fbo = g.ctx.framebuffer(color_attachments=[g.ctx.texture((g.display_width, g.display_height), 4)])
 
+def sync_grid_from_engine(g):
+    g.rows = g.engine.rows()
+    g.cols = g.engine.cols()
+    g.playingGrid = np.array(g.engine.get_grid_values(), dtype=int).reshape(g.rows, g.cols)
+    g.points = g.engine.score()
+    g.passive_map = {(r, c): ptype for r, c, ptype in g.engine.get_passive_map()}
+
+def process_move(g, direction):
+    if g.animating:
+        return
+
+    result = g.engine.process_move(direction)
+
+    if not result.board_changed:
+        return
+
+    sync_grid_from_engine(g)
+
+    g.animating = True
+    g.animation_progress = 0
+    g.moving_tiles = [(m.start_row, m.start_col, m.end_row, m.end_col, m.value, 0)
+                      for m in result.moves]
+    g.merging_tiles = [(m.row, m.col, m.new_value, 1.0) for m in result.merges]
+
+    # Slow mover updates animate as single-cell moves
+    for u in result.slow_mover_updates:
+        if u.old_row != u.new_row or u.old_col != u.new_col:
+            g.moving_tiles.append((u.old_row, u.old_col, u.new_row, u.new_col, u.value, 0))
+
+    if result.spawned_tile[0] >= 0:
+        g.new_tile_pos = tuple(result.spawned_tile)
+        g.new_tile_scale = 0
+
+    if result.should_expand:
+        g.pending_expand = True
+        update_color_scheme(g)
+
+    # Queue passive candidates for menu
+    g.pending_passives = [(c.row, c.col, c.tile_value) for c in result.passive_candidates]
+
+    g.frozen_tiles.clear()
+
+    print()
+    print(f"Score: {g.points} (+{result.points_gained})")
+
 def start_grid_expansion(g):
     g.expand_old_sx = g.start_x
     g.expand_old_sy = g.start_y
@@ -805,25 +531,9 @@ def start_grid_expansion(g):
 
     g.expand_direction = rand.choice(["up", "down", "left", "right"])
 
-    if g.expand_direction in ("up", "down"):
-        g.rows += 1
-    else:
-        g.cols += 1
-
-    new_grid = np.zeros((g.rows, g.cols), dtype=int)
-
-    if g.expand_direction == "down":
-        new_grid[:g.expand_old_rows, :g.expand_old_cols] = g.playingGrid
-    elif g.expand_direction == "up":
-        new_grid[1:, :g.expand_old_cols] = g.playingGrid
-    elif g.expand_direction == "right":
-        new_grid[:g.expand_old_rows, :g.expand_old_cols] = g.playingGrid
-    elif g.expand_direction == "left":
-        new_grid[:g.expand_old_rows, 1:] = g.playingGrid
-
-    g.playingGrid = new_grid
-    g.playingGridLast = g.playingGrid.copy()
-
+    # Tell the C++ engine to expand the board
+    g.engine.complete_expansion(g.expand_direction)
+    sync_grid_from_engine(g)
     recalculate_positions(g)
 
     g.grid_expanding = True
@@ -832,72 +542,38 @@ def start_grid_expansion(g):
     g.pending_shop = True
     print(f"Grid expanded to {g.rows}x{g.cols}! (direction: {g.expand_direction})")
 
-def process_move(g, direction):
-    if g.animating:
-        return
+def place_bomb_at_tile(g, r, c):
+    if g.playingGrid[r][c] == 0:
+        g.engine.place_bomb(r, c)
+        sync_grid_from_engine(g)
+        g.selecting_bomb_position = False
 
-    grid_before = g.playingGrid.copy()
-
-    frozen = g.frozen_tiles.copy()
-
-    if direction == "up":
-        moves, merges, bomb_destroyed = moveUp(g.playingGrid, g.rows, g.cols, frozen)
-    elif direction == "down":
-        moves, merges, bomb_destroyed = moveDown(g.playingGrid, g.rows, g.cols, frozen)
-    elif direction == "left":
-        moves, merges, bomb_destroyed = moveLeft(g.playingGrid, g.rows, g.cols, frozen)
-    elif direction == "right":
-        moves, merges, bomb_destroyed = moveRight(g.playingGrid, g.rows, g.cols, frozen)
-
-    if np.array_equal(grid_before, g.playingGrid):
-        return
-
-    # Freeze wears off after one move
-    g.frozen_tiles.clear()
-
-    points_gained = sum(value for _, _, value in merges)
-
-    if moves or merges:
         g.animating = True
-        g.animation_progress = 0
-        g.moving_tiles = [(sr, sc, er, ec, val, 0) for sr, sc, er, ec, val in moves]
-        g.merging_tiles = [(r, c, val, 1.0) for r, c, val in merges]
+        g.animation_progress = 0.7
+        g.new_tile_pos = (r, c)
+        g.new_tile_scale = 0
 
-        new_pos = newNum(g.playingGrid, excluded=bomb_destroyed)
+        print(f"Bomb placed at position ({r}, {c})")
 
-        if new_pos:
-            g.new_tile_pos = new_pos
-            g.new_tile_scale = 0
-
-        g.points += points_gained
-
-        if any(val == g.tarExpand for _, _, val in merges) or (new_pos and g.playingGrid[new_pos[0]][new_pos[1]] == g.tarExpand):
-            g.pending_expand = True
-            g.tarExpand *= 2
-            # Update color scheme when expansion target changes
-            update_color_scheme(g)
-
-        g.playingGridLast = g.playingGrid.copy()
-        print()
-        print(f"Score: {g.points} (+{points_gained})")
+def place_freeze_on_tile(g, r, c):
+    if g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
+        g.engine.place_freeze(r, c)
+        g.frozen_tiles.add((r, c))
+        g.selecting_freeze_position = False
+        print(f"Tile at ({r}, {c}) frozen for 1 turn")
 
 def update_color_transition(g):
-    """Update color transition animation."""
     if not _color_transition['active']:
         return False
 
-    # Update progress
     _color_transition['progress'] += _color_transition['speed']
 
     if _color_transition['progress'] >= 1.0:
-        # Transition complete
         _color_transition['progress'] = 1.0
         _color_transition['active'] = False
 
-    # Apply easing
     t = ease_out_cubic(_color_transition['progress'])
 
-    # Interpolate tile colors
     old_colors = _color_transition['old_colors']
     new_colors = _color_transition['new_colors']
 
@@ -907,7 +583,6 @@ def update_color_transition(g):
         else:
             COLORS[key] = new_colors[key]
 
-    # Interpolate UI colors
     old_ui = _color_transition['old_ui_colors']
     new_ui = _color_transition['new_ui_colors']
 
@@ -917,7 +592,6 @@ def update_color_transition(g):
         else:
             UI_COLORS[key] = new_ui[key]
 
-    # Rebuild tile cache every 3 frames during transition (optimization)
     _color_transition['cache_rebuild_counter'] += 1
     if _color_transition['cache_rebuild_counter'] >= 3 or not _color_transition['active']:
         _color_transition['cache_rebuild_counter'] = 0
@@ -966,6 +640,134 @@ def update_animations(g, dt):
         if g.pending_expand:
             g.pending_expand = False
             start_grid_expansion(g)
+        elif g.pending_passives:
+            open_next_passive_menu(g)
+
+def open_next_passive_menu(g):
+    if g.pending_passives:
+        r, c, val = g.pending_passives[0]
+        g.passive_menu_tile = (r, c)
+        g.passive_menu_open = True
+
+def handle_passive_menu_click(g, mouse_pos):
+    mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
+    mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
+
+    layout = getattr(g, '_passive_menu_layout', None)
+    if not layout:
+        return
+
+    for i, (btn_x, btn_y, btn_w, btn_h, passive_type) in enumerate(layout['buttons']):
+        if btn_x <= mouse_x <= btn_x + btn_w and btn_y <= mouse_y <= btn_y + btn_h:
+            r, c = g.passive_menu_tile
+            g.engine.assign_passive(r, c, passive_type)
+            sync_grid_from_engine(g)
+            g.passive_menu_open = False
+            g.pending_passives.pop(0)
+            print(f"Assigned '{engine.passive_name(engine.PassiveType(passive_type))}' to tile at ({r}, {c})")
+
+            if g.pending_passives:
+                open_next_passive_menu(g)
+            return
+
+def draw_passive_menu(g):
+    overlay = pygame.Surface((g.RENDER_WIDTH, g.RENDER_HEIGHT), pygame.SRCALPHA)
+    overlay_color = pygame.Color(UI_COLORS['overlay'])
+    overlay.fill((overlay_color.r, overlay_color.g, overlay_color.b, 160))
+    g.render_surface.blit(overlay, (0, 0))
+
+    panel_w, panel_h = 700, 400
+    panel_x = (g.RENDER_WIDTH - panel_w) // 2
+    panel_y = (g.RENDER_HEIGHT - panel_h) // 2
+
+    pygame.draw.rect(g.render_surface, UI_COLORS['panel'], (panel_x, panel_y, panel_w, panel_h))
+    pygame.draw.rect(g.render_surface, UI_COLORS['border'], (panel_x, panel_y, panel_w, panel_h), 3)
+
+    # Title
+    title = g.font.render("PASSIVE ABILITY", True, UI_COLORS['text'])
+    title_rect = title.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 40))
+    g.render_surface.blit(title, title_rect)
+
+    # Show which tile
+    r, c = g.passive_menu_tile
+    tile_val = g.playingGrid[r][c]
+    tile_text = g.small_font.render(f"Select a passive for tile [{tile_val}] at ({r}, {c})", True, UI_COLORS['text_dim'])
+    tile_rect = tile_text.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 80))
+    g.render_surface.blit(tile_text, tile_rect)
+
+    # Get mouse position
+    mouse_pos = pygame.mouse.get_pos()
+    mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
+    mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
+
+    # Passive option buttons
+    available_passives = [
+        (int(engine.PassiveType.A_LITTLE_SLOW),
+         engine.passive_name(engine.PassiveType.A_LITTLE_SLOW),
+         engine.passive_description(engine.PassiveType.A_LITTLE_SLOW)),
+    ]
+
+    buttons = []
+    btn_w, btn_h = 600, 70
+    btn_start_y = panel_y + 130
+
+    for i, (ptype, pname, pdesc) in enumerate(available_passives):
+        btn_x = (g.RENDER_WIDTH - btn_w) // 2
+        btn_y = btn_start_y + i * (btn_h + 15)
+
+        is_hover = btn_x <= mouse_x <= btn_x + btn_w and btn_y <= mouse_y <= btn_y + btn_h
+        btn_color = UI_COLORS['button_hover'] if is_hover else UI_COLORS['button_normal']
+
+        pygame.draw.rect(g.render_surface, btn_color, (btn_x, btn_y, btn_w, btn_h))
+        pygame.draw.rect(g.render_surface, UI_COLORS['border'], (btn_x, btn_y, btn_w, btn_h), 2)
+
+        name_surf = g.font.render(pname, True, UI_COLORS['text'])
+        g.render_surface.blit(name_surf, (btn_x + 15, btn_y + 8))
+
+        desc_surf = g.small_font.render(pdesc, True, UI_COLORS['text_dim'])
+        g.render_surface.blit(desc_surf, (btn_x + 15, btn_y + 38))
+
+        buttons.append((btn_x, btn_y, btn_w, btn_h, ptype))
+
+    g._passive_menu_layout = {'buttons': buttons}
+
+def draw_passive_indicator(g, r, c):
+    dot_x = g.start_x + c * g.square_size + g.square_size // 2
+    dot_y = g.start_y + r * g.square_size + g.square_size - 12
+    pygame.draw.circle(g.render_surface, UI_COLORS['accent_green'], (dot_x, dot_y), 5)
+
+def draw_passive_tooltip(g, r, c, passive_type):
+    ptype = engine.PassiveType(passive_type)
+    name = engine.passive_name(ptype)
+    desc = engine.passive_description(ptype)
+
+    mouse_pos = pygame.mouse.get_pos()
+    mx = int(mouse_pos[0] * g.RENDER_WIDTH / g.display_width)
+    my = int(mouse_pos[1] * g.RENDER_HEIGHT / g.display_height)
+
+    name_surf = g.small_font.render(name, True, UI_COLORS['text'])
+    desc_surf = g.small_font.render(desc, True, UI_COLORS['text_dim'])
+
+    tw = max(name_surf.get_width(), desc_surf.get_width()) + 20
+    th = name_surf.get_height() + desc_surf.get_height() + 15
+
+    tx = mx + 15
+    ty = my - th - 10
+    if tx + tw > g.RENDER_WIDTH:
+        tx = mx - tw - 15
+    if ty < 0:
+        ty = my + 20
+
+    tooltip = pygame.Surface((tw, th), pygame.SRCALPHA)
+    panel_color = pygame.Color(UI_COLORS['panel'])
+    tooltip.fill((panel_color.r, panel_color.g, panel_color.b, 220))
+    border_color = pygame.Color(UI_COLORS['border'])
+    pygame.draw.rect(tooltip, (border_color.r, border_color.g, border_color.b, 220), (0, 0, tw, th), 2)
+
+    tooltip.blit(name_surf, (10, 5))
+    tooltip.blit(desc_surf, (10, name_surf.get_height() + 10))
+
+    g.render_surface.blit(tooltip, (tx, ty))
 
 def draw_tile(g, r, c, value, scale=1.0, alpha=255):
     x = g.start_x + c * g.square_size
@@ -1042,7 +844,6 @@ def handle_button_click(g, mouse_pos):
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
     mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
 
-    # Match the two-button layout computed in main.py
     button_gap = 20
     total_w = g.button_width * 2 + button_gap
     btn_left_x = g.start_x + (g.grid_width - total_w) // 2
@@ -1078,56 +879,30 @@ def get_tile_from_mouse(g, mouse_pos):
 
     return None
 
-def place_bomb_at_tile(g, r, c):
-    if g.playingGrid[r][c] == 0:
-        g.playingGrid[r][c] = -1
-        g.selecting_bomb_position = False
-
-        g.animating = True
-        g.animation_progress = 0.7
-        g.new_tile_pos = (r, c)
-        g.new_tile_scale = 0
-
-        print(f"Bomb placed at position ({r}, {c})")
-
-def place_freeze_on_tile(g, r, c):
-    if g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
-        g.frozen_tiles.add((r, c))
-        g.selecting_freeze_position = False
-        print(f"Tile at ({r}, {c}) frozen for 1 turn")
-
 def draw_shop(g):
-    """Render the shop popup panel with semi-transparent overlay."""
-    # Semi-transparent dark overlay
     overlay = pygame.Surface((g.RENDER_WIDTH, g.RENDER_HEIGHT), pygame.SRCALPHA)
     overlay_color = pygame.Color(UI_COLORS['overlay'])
     overlay.fill((overlay_color.r, overlay_color.g, overlay_color.b, 160))
     g.render_surface.blit(overlay, (0, 0))
 
-    # Panel dimensions
     panel_w, panel_h = 800, 600
     panel_x = (g.RENDER_WIDTH - panel_w) // 2
     panel_y = (g.RENDER_HEIGHT - panel_h) // 2
 
-    # Panel background
     pygame.draw.rect(g.render_surface, UI_COLORS['panel'], (panel_x, panel_y, panel_w, panel_h))
     pygame.draw.rect(g.render_surface, UI_COLORS['border'], (panel_x, panel_y, panel_w, panel_h), 3)
 
-    # Title
     title = g.font.render("SHOP", True, UI_COLORS['text'])
     title_rect = title.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 40))
     g.render_surface.blit(title, title_rect)
 
-    # Score display
     score_text = g.small_font.render(f"Score: {g.points}", True, UI_COLORS['accent_green'])
     score_rect = score_text.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 80))
     g.render_surface.blit(score_text, score_rect)
 
-    # Ability rows
     row_y_start = panel_y + 130
     row_height = 80
 
-    # Get mouse position in render coordinates for hover effects
     mouse_pos = pygame.mouse.get_pos()
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
     mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
@@ -1135,17 +910,14 @@ def draw_shop(g):
     for i, ability in enumerate(g.abilities):
         y = row_y_start + i * row_height
 
-        # Ability name + description
         name_text = g.font.render(ability['name'], True, UI_COLORS['text'])
         g.render_surface.blit(name_text, (panel_x + 30, y))
         desc_text = g.small_font.render(ability['description'], True, UI_COLORS['text_dim'])
         g.render_surface.blit(desc_text, (panel_x + 30, y + 32))
 
-        # Cost per charge
         cost_text = g.small_font.render(f"{ability['cost']}pts ea.", True, UI_COLORS['accent_blue'])
         g.render_surface.blit(cost_text, (panel_x + 350, y + 10))
 
-        # - button
         btn_size = 40
         minus_x = panel_x + 560
         btn_y = y + 10
@@ -1158,12 +930,10 @@ def draw_shop(g):
         minus_rect = minus_text.get_rect(center=(minus_x + btn_size // 2, btn_y + btn_size // 2))
         g.render_surface.blit(minus_text, minus_rect)
 
-        # Charges count
         qty_text = g.font.render(str(ability['charges']), True, UI_COLORS['text'])
         qty_rect = qty_text.get_rect(center=(minus_x + btn_size + 35, btn_y + btn_size // 2))
         g.render_surface.blit(qty_text, qty_rect)
 
-        # + button
         plus_x = minus_x + btn_size + 70
         can_add = g.points >= ability['cost']
 
@@ -1175,11 +945,9 @@ def draw_shop(g):
         plus_rect = plus_text.get_rect(center=(plus_x + btn_size // 2, btn_y + btn_size // 2))
         g.render_surface.blit(plus_text, plus_rect)
 
-    # Divider line
     div_y = panel_y + panel_h - 100
     pygame.draw.line(g.render_surface, UI_COLORS['border'], (panel_x + 30, div_y), (panel_x + panel_w - 30, div_y), 2)
 
-    # DONE button (centered)
     done_w, done_h = 160, 50
     done_x = (g.RENDER_WIDTH - done_w) // 2
     done_y = div_y + 25
@@ -1192,7 +960,6 @@ def draw_shop(g):
     done_rect = done_text.get_rect(center=(done_x + done_w // 2, done_y + done_h // 2))
     g.render_surface.blit(done_text, done_rect)
 
-    # Store layout info for click handling
     g._shop_layout = {
         'row_y_start': row_y_start, 'row_height': row_height,
         'btn_size': btn_size, 'minus_x': minus_x,
@@ -1202,7 +969,6 @@ def draw_shop(g):
 
 
 def handle_shop_click(g, mouse_pos):
-    """Process clicks in the shop panel. +/- apply immediately."""
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
     mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
 
@@ -1216,14 +982,12 @@ def handle_shop_click(g, mouse_pos):
     for i, ability in enumerate(g.abilities):
         btn_y = layout['row_y_start'] + i * layout['row_height'] + 10
 
-        # Minus button — refund a charge
         if minus_x <= mouse_x <= minus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size:
             if ability['charges'] > 0:
                 ability['charges'] -= 1
                 g.points += ability['cost']
             return
 
-        # Plus button — buy a charge immediately
         plus_x = minus_x + layout['plus_x_offset']
         if plus_x <= mouse_x <= plus_x + btn_size and btn_y <= mouse_y <= btn_y + btn_size:
             if g.points >= ability['cost']:
@@ -1231,7 +995,6 @@ def handle_shop_click(g, mouse_pos):
                 ability['charges'] += 1
             return
 
-    # Done button
     dx, dy, dw, dh = layout['done_rect']
     if dx <= mouse_x <= dx + dw and dy <= mouse_y <= dy + dh:
         g.shop_open = False

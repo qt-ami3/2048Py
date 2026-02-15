@@ -5,6 +5,7 @@ import pygame
 import numpy as np
 import functions as func
 import moderngl
+import game2048_engine as engine
 
 # pygame setup
 pygame.init()
@@ -83,7 +84,6 @@ g.start_x = 0
 g.start_y = 0
 g.menu_y = 0
 g.button_x = 0
-g.tarExpand = 2048
 g.button_width = g.ui_config['button_width']
 g.button_height = g.ui_config['button_height']
 g.menu_height = g.ui_config['menu_height']
@@ -91,16 +91,18 @@ g.menu_height = g.ui_config['menu_height']
 # Initialize positions
 func.recalculate_positions(g)
 
-# Initialize playing grid
-g.playingGrid = np.zeros((g.rows, g.cols), dtype=int)
+# Initialize C++ game engine (spawns 2 tiles internally)
+g.engine = engine.GameEngine(g.rows, g.cols)
+g.playingGrid = np.array(g.engine.get_grid_values(), dtype=int).reshape(g.rows, g.cols)
 
-func.newNum(g.playingGrid)
-func.newNum(g.playingGrid)
+# Score tracking
+g.points = g.engine.score()
 
-g.playingGridLast = g.playingGrid.copy()
-
-# Score tracking - start with initial tiles
-g.points = 4500
+# Passive tracking
+g.passive_map = {}         # {(r,c): passive_type_int}
+g.pending_passives = []    # [(row, col, tile_value), ...]
+g.passive_menu_open = False
+g.passive_menu_tile = None
 
 # Ability system
 g.abilities = [
@@ -193,6 +195,15 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+
+        # Passive menu intercepts all input when open
+        if g.passive_menu_open:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                func.handle_passive_menu_click(g, event.pos)
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F11:
+                    func.toggle_fullscreen(g)
+            continue
 
         # Shop intercepts all input when open
         if g.shop_open:
@@ -312,6 +323,9 @@ while running:
                 value = g.playingGrid[r][c]
                 if value:
                     func.draw_tile(g, r, c, value)
+                    # Draw passive indicator dot
+                    if (r, c) in g.passive_map:
+                        func.draw_passive_indicator(g, r, c)
     else:
         merging_positions = {(r, c) for r, c, _, _ in g.merging_tiles}
 
@@ -323,6 +337,8 @@ while running:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in g.moving_tiles)
                     if not is_moving_destination or g.animation_progress >= 1.0:
                         func.draw_tile(g, r, c, value)
+                        if (r, c) in g.passive_map:
+                            func.draw_passive_indicator(g, r, c)
 
         # Draw moving tiles from cache
         for sr, sc, er, ec, val, progress in g.moving_tiles:
@@ -362,6 +378,13 @@ while running:
             tint.fill((100, 160, 220, 80))
             g.render_surface.blit(tint, (fx, fy))
 
+    # Draw passive tooltip on hover (when not selecting an ability)
+    if not g.selecting_bomb_position and not g.selecting_freeze_position and not g.animating:
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = func.get_tile_from_mouse(g, mouse_pos)
+        if hovered and hovered in g.passive_map:
+            func.draw_passive_tooltip(g, hovered[0], hovered[1], g.passive_map[hovered])
+
     # Restore start positions after expansion animation drawing
     if g.grid_expanding:
         g.start_x, g.start_y = _expand_real_sx, _expand_real_sy
@@ -397,6 +420,10 @@ while running:
     # Draw shop overlay on top of everything
     if g.shop_open:
         func.draw_shop(g)
+
+    # Draw passive menu overlay on top of everything
+    if g.passive_menu_open:
+        func.draw_passive_menu(g)
 
     # Render to OpenGL with CRT shader
     func.render_to_opengl(g)
