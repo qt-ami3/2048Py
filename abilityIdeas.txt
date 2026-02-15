@@ -1,18 +1,8 @@
-dictionary:
-
-  node:
-    a block containing a value evenly divisible by 2.
-  points:
-    uses to buy abilites as you progress through levels.
-
 added:
   bomb:
     blows up a node.
-
-freeze:
-  freezes a node for a stacking duration.
-
-  vines(alt) freezes node for static duration.
+  freeze:
+    freezes a node for a turn.
 
 pipe:
   a directional pipe that allows occupying nodes to traverse only one axis.

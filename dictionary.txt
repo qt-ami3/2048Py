@@ -1,0 +1,4 @@
+  tile:
+    a block containing a value evenly divisible by 2.
+  points:
+    uses to buy abilites as you progress through levels.

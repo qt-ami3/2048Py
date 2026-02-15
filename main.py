@@ -111,6 +111,7 @@ g.selecting_bomb_position = False
 g.selecting_freeze_position = False
 g.frozen_tiles = set()
 g.hovered_tile = None
+
 g.bomb_image = None
 # Shop state
 g.shop_open = True  # Start with shop open
@@ -248,9 +249,10 @@ while running:
                     func.handle_button_click(g, event.pos)
 
     func.update_animations(g, dt)
+    func.update_color_transition(g)
 
-    # Draw to pygame surface
-    g.render_surface.fill("#4c566a")
+    # Draw to pygame surface (background color from current scheme)
+    g.render_surface.fill(func.COLORS[0])
 
     # Draw score (cached - only re-renders when score changes)
     score_text = func.get_cached_score(g, g.points)
@@ -283,11 +285,11 @@ while running:
                 is_new_cell = False
 
             if g.selecting_bomb_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] == 0:
-                pygame.draw.rect(g.render_surface, "#a3be8c", (x, y, g.square_size, g.square_size))
-                pygame.draw.rect(g.render_surface, "#d8dee9", (x, y, g.square_size, g.square_size), 4)
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['accent_green'], (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
             elif g.selecting_freeze_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
-                pygame.draw.rect(g.render_surface, "#88c0d0", (x, y, g.square_size, g.square_size))
-                pygame.draw.rect(g.render_surface, "#d8dee9", (x, y, g.square_size, g.square_size), 4)
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['accent_blue'], (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
             elif is_new_cell:
                 # New cell stretches/fades in during expansion
                 alpha = int(255 * func.ease_out_cubic(g.expand_progress))
@@ -295,12 +297,12 @@ while running:
                 scaled = max(int(g.square_size * cell_scale), 1)
                 off = (g.square_size - scaled) // 2
                 cell_surf = pygame.Surface((scaled, scaled), pygame.SRCALPHA)
-                border_color = pygame.Color("#d8dee9")
+                border_color = pygame.Color(func.UI_COLORS['border'])
                 pygame.draw.rect(cell_surf, (border_color.r, border_color.g, border_color.b, alpha),
                                (0, 0, scaled, scaled), g.ui_config['grid_border_width'])
                 g.render_surface.blit(cell_surf, (x + off, y + off))
             else:
-                pygame.draw.rect(g.render_surface, "#d8dee9", (x, y, g.square_size, g.square_size), g.ui_config['grid_border_width'])
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), g.ui_config['grid_border_width'])
 
     # Draw tiles
     if not g.animating:
@@ -365,15 +367,15 @@ while running:
         g.start_x, g.start_y = _expand_real_sx, _expand_real_sy
 
     if g.selecting_bomb_position:
-        instruction_text = g.small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, "#a3be8c")
+        instruction_text = g.small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, func.UI_COLORS['accent_green'])
         instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
         g.render_surface.blit(instruction_text, instruction_rect)
     elif g.selecting_freeze_position:
-        instruction_text = g.small_font.render("Click a number tile to freeze it (ESC to cancel)", True, "#88c0d0")
+        instruction_text = g.small_font.render("Click a number tile to freeze it (ESC to cancel)", True, func.UI_COLORS['accent_blue'])
         instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
         g.render_surface.blit(instruction_text, instruction_rect)
     else:
-        menu_title = g.font.render("ABILITIES", True, "#eceff4")
+        menu_title = g.font.render("ABILITIES", True, func.UI_COLORS['text'])
         menu_title_rect = menu_title.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y))
         g.render_surface.blit(menu_title, menu_title_rect)
 
