@@ -34,10 +34,22 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         }
     }
 
-    // Step 1: Build effective frozen set (frozen tiles + active slow mover positions)
+    // Step 1: Build effective frozen set
+    // Freeze: user-frozen tiles + active slow movers + ALL A_LITTLE_SLOW tiles
+    // A_LITTLE_SLOW tiles are frozen during normal movement and advanced separately.
     auto effective_frozen = get_effective_frozen();
+    for (const auto& pos : pre_move_slow_positions) {
+        effective_frozen.insert(pos);
+    }
 
-    // Step 2: Execute movement (all normal tiles move first)
+    // Compute movement direction vector
+    int move_dr = 0, move_dc = 0;
+    if (direction == "up") move_dr = -1;
+    else if (direction == "down") move_dr = 1;
+    else if (direction == "left") move_dc = -1;
+    else if (direction == "right") move_dc = 1;
+
+    // Step 2: Execute movement (all normal tiles move; slow tiles are frozen)
     MoveResult move_result;
     if (direction == "up")
         move_result = movement::move_up(board_, effective_frozen, slow_movers_);
@@ -48,8 +60,170 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     else if (direction == "right")
         move_result = movement::move_right(board_, effective_frozen, slow_movers_);
 
-    // Step 3: Advance slow movers (after all normal tiles have settled)
+    // Step 3: Advance existing slow movers (after normal tiles have settled)
     result.slow_mover_updates = advance_slow_movers();
+
+    // Step 3.5: Advance A_LITTLE_SLOW tiles that aren't active slow movers.
+    // They were frozen during movement; now move them 1 cell in the direction.
+    // Also check behind for same-value tiles to merge (they couldn't merge during
+    // movement because the slow tile was frozen as a segment boundary).
+
+    // Build set of active slow mover positions to skip them.
+    std::set<std::pair<int,int>> active_sm_positions;
+    for (const auto& sm : slow_movers_) {
+        if (sm.active) active_sm_positions.insert({sm.current_row, sm.current_col});
+    }
+
+    // Process in correct order: tiles closest to movement wall first.
+    // For left/up: ascending order (default set iteration).
+    // For right/down: descending order (reverse iteration).
+    std::vector<std::pair<int,int>> slow_order(pre_move_slow_positions.begin(),
+                                                pre_move_slow_positions.end());
+    if (direction == "right" || direction == "down") {
+        std::reverse(slow_order.begin(), slow_order.end());
+    }
+
+    for (const auto& [sr, sc] : slow_order) {
+        // Skip if this is an active slow mover (handled by advance_slow_movers)
+        if (active_sm_positions.count({sr, sc})) continue;
+
+        // Skip if tile is no longer there (consumed by a previous merge this step)
+        if (!board_.at(sr, sc).is_numbered()) continue;
+        if (board_.at(sr, sc).passive != PassiveType::A_LITTLE_SLOW) continue;
+
+        int tile_value = board_.at(sr, sc).value;
+
+        // Check behind (opposite to movement direction) for same-value merge.
+        // A tile may have compacted next to this frozen slow tile during movement.
+        int behind_r = sr - move_dr;
+        int behind_c = sc - move_dc;
+
+        if (behind_r >= 0 && behind_r < board_.rows() &&
+            behind_c >= 0 && behind_c < board_.cols() &&
+            board_.at(behind_r, behind_c).is_numbered() &&
+            board_.at(behind_r, behind_c).value == tile_value) {
+
+            int new_value = tile_value * 2;
+
+            // Record move and merge
+            move_result.moves.push_back({behind_r, behind_c, sr, sc, tile_value});
+            move_result.merges.push_back({sr, sc, new_value});
+
+            // Consume behind tile
+            board_.at(behind_r, behind_c).value = 0;
+            board_.at(behind_r, behind_c).passive = PassiveType::NONE;
+
+            // Update slow tile value
+            board_.at(sr, sc).value = new_value;
+            tile_value = new_value;
+            move_result.board_changed = true;
+        }
+
+        // If this tile is user-frozen, don't advance it (freeze holds for 1 turn).
+        // The behind merge above still applies since tiles slid next to it.
+        if (frozen_tiles_.count({sr, sc})) continue;
+
+        // Scan ahead in movement direction to find ultimate destination
+        int dest_r = sr, dest_c = sc;
+        int scan_r = sr + move_dr, scan_c = sc + move_dc;
+        bool dest_is_merge = false;
+
+        while (scan_r >= 0 && scan_r < board_.rows() &&
+               scan_c >= 0 && scan_c < board_.cols()) {
+            if (board_.at(scan_r, scan_c).is_empty()) {
+                dest_r = scan_r;
+                dest_c = scan_c;
+            } else if (board_.at(scan_r, scan_c).value == tile_value &&
+                       board_.at(scan_r, scan_c).is_numbered()) {
+                dest_r = scan_r;
+                dest_c = scan_c;
+                dest_is_merge = true;
+                break;
+            } else {
+                break;
+            }
+            scan_r += move_dr;
+            scan_c += move_dc;
+        }
+
+        // If destination is same as current position, tile can't advance
+        if (dest_r == sr && dest_c == sc) continue;
+
+        int next_r = sr + move_dr;
+        int next_c = sc + move_dc;
+        int total_dist = std::abs(dest_r - sr) + std::abs(dest_c - sc);
+
+        // Check if the immediate next cell is the merge target
+        if (next_r == dest_r && next_c == dest_c && dest_is_merge) {
+            // Merge with adjacent tile ahead
+            int new_value = tile_value * 2;
+
+            board_.at(sr, sc).value = 0;
+            board_.at(sr, sc).passive = PassiveType::NONE;
+            board_.at(dest_r, dest_c).value = new_value;
+            board_.at(dest_r, dest_c).passive = PassiveType::A_LITTLE_SLOW;
+
+            move_result.moves.push_back({sr, sc, dest_r, dest_c, tile_value});
+            move_result.merges.push_back({dest_r, dest_c, new_value});
+            move_result.board_changed = true;
+        } else {
+            // Move 1 cell to empty space
+            Tile saved = board_.at(sr, sc);
+            board_.at(sr, sc).value = 0;
+            board_.at(sr, sc).passive = PassiveType::NONE;
+            board_.at(next_r, next_c) = saved;
+
+            move_result.moves.push_back({sr, sc, next_r, next_c, tile_value});
+            move_result.board_changed = true;
+
+            // If destination is further than 1 cell, create slow mover
+            if (total_dist > 1) {
+                SlowMoverState sm;
+                sm.current_row = next_r;
+                sm.current_col = next_c;
+                sm.dest_row = dest_r;
+                sm.dest_col = dest_c;
+                sm.dr = move_dr;
+                sm.dc = move_dc;
+                sm.value = saved.value;
+                sm.passive = saved.passive;
+                sm.active = true;
+                slow_movers_.push_back(sm);
+            }
+        }
+    }
+
+    // Step 3.6: Check for merges between tiles and frozen slow movers.
+    // A tile may have slid next to a frozen slow mover with the same value.
+    for (auto& sm : slow_movers_) {
+        if (!sm.active) continue;
+        if (!frozen_tiles_.count({sm.current_row, sm.current_col})) continue;
+
+        // Check cell from the approaching direction (opposite of movement)
+        int adj_r = sm.current_row - move_dr;
+        int adj_c = sm.current_col - move_dc;
+
+        if (adj_r < 0 || adj_r >= board_.rows() ||
+            adj_c < 0 || adj_c >= board_.cols()) continue;
+
+        if (!board_.at(adj_r, adj_c).is_numbered()) continue;
+        if (board_.at(adj_r, adj_c).value != sm.value) continue;
+
+        // Merge: adjacent tile is absorbed into the frozen slow mover
+        int old_adj_value = board_.at(adj_r, adj_c).value;
+        int new_value = sm.value * 2;
+
+        board_.at(adj_r, adj_c).value = 0;
+        board_.at(adj_r, adj_c).passive = PassiveType::NONE;
+
+        sm.value = new_value;
+        board_.at(sm.current_row, sm.current_col).value = new_value;
+        // Passive stays A_LITTLE_SLOW
+
+        move_result.moves.push_back({adj_r, adj_c, sm.current_row, sm.current_col, old_adj_value});
+        move_result.merges.push_back({sm.current_row, sm.current_col, new_value});
+        move_result.board_changed = true;
+    }
 
     // Check if anything changed (board or slow movers moved)
     bool slow_movers_moved = !result.slow_mover_updates.empty();
@@ -88,154 +262,6 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     result.spawned_tile = board_.spawn_number(move_result.bomb_destroyed);
     if (result.spawned_tile.first >= 0) {
         excluded.insert(result.spawned_tile);
-    }
-
-    // Step 8: Handle A_LITTLE_SLOW tiles after movement
-    // Both merged and non-merged tiles with A_LITTLE_SLOW need to be rewound
-    // so they only advance 1 cell per turn.
-
-    // 8a: Handle merged tiles that inherited A_LITTLE_SLOW
-    for (auto& merge : result.merges) {
-        if (board_.at(merge.row, merge.col).passive != PassiveType::A_LITTLE_SLOW)
-            continue;
-
-        // Find all moves that contributed to this merge
-        std::vector<MoveInfo*> merge_moves;
-        for (auto& mv : result.moves) {
-            if (mv.end_row == merge.row && mv.end_col == merge.col)
-                merge_moves.push_back(&mv);
-        }
-
-        // Find the slow source tile closest to the merge position
-        int best_start_r = -1, best_start_c = -1;
-        int best_dist = INT_MAX;
-
-        for (auto* mv : merge_moves) {
-            if (pre_move_slow_positions.count({mv->start_row, mv->start_col})) {
-                int d = std::abs(mv->start_row - merge.row) +
-                        std::abs(mv->start_col - merge.col);
-                if (d < best_dist) {
-                    best_dist = d;
-                    best_start_r = mv->start_row;
-                    best_start_c = mv->start_col;
-                }
-            }
-        }
-
-        // Check if a slow source was already at the merge position (no move generated)
-        if (pre_move_slow_positions.count({merge.row, merge.col})) {
-            best_dist = 0;
-            best_start_r = merge.row;
-            best_start_c = merge.col;
-        }
-
-        // No rewind needed if closest slow source moved 0-1 cells
-        if (best_dist <= 1 || best_start_r < 0) continue;
-
-        // Direction of movement
-        int dr = 0, dc = 0;
-        if (merge.row > best_start_r) dr = 1;
-        else if (merge.row < best_start_r) dr = -1;
-        if (merge.col > best_start_c) dc = 1;
-        else if (merge.col < best_start_c) dc = -1;
-
-        // One step from the slow source's original position
-        int step_r = best_start_r + dr;
-        int step_c = best_start_c + dc;
-        int orig_r = merge.row;
-        int orig_c = merge.col;
-
-        // Rewind: move merged tile from compacted position to 1-step position
-        Tile saved = board_.at(orig_r, orig_c);
-        board_.at(orig_r, orig_c).value = 0;
-        board_.at(orig_r, orig_c).passive = PassiveType::NONE;
-        board_.at(step_r, step_c) = saved;
-
-        // Update merge info to reflect new position
-        merge.row = step_r;
-        merge.col = step_c;
-
-        // Update move endpoints
-        for (auto* mv : merge_moves) {
-            mv->end_row = step_r;
-            mv->end_col = step_c;
-        }
-
-        // Create slow mover to gradually reach the original target
-        SlowMoverState sm;
-        sm.current_row = step_r;
-        sm.current_col = step_c;
-        sm.dest_row = orig_r;
-        sm.dest_col = orig_c;
-        sm.dr = dr;
-        sm.dc = dc;
-        sm.value = saved.value;
-        sm.passive = saved.passive;
-        sm.active = true;
-        slow_movers_.push_back(sm);
-    }
-
-    // 8b: Handle non-merge tiles with A_LITTLE_SLOW
-    std::set<std::pair<int,int>> merge_positions;
-    for (const auto& m : result.merges) {
-        merge_positions.insert({m.row, m.col});
-    }
-    for (auto& mv : result.moves) {
-        // Skip tiles that ended at a merge position
-        if (merge_positions.count({mv.end_row, mv.end_col}))
-            continue;
-
-        // Check if the tile at the destination has A_LITTLE_SLOW
-        if (board_.at(mv.end_row, mv.end_col).passive == PassiveType::A_LITTLE_SLOW &&
-            board_.at(mv.end_row, mv.end_col).is_numbered()) {
-
-            // Only create slow mover if the tile actually moved more than 1 cell
-            int dist_r = std::abs(mv.end_row - mv.start_row);
-            int dist_c = std::abs(mv.end_col - mv.start_col);
-            int total_dist = dist_r + dist_c;
-
-            if (total_dist > 1) {
-                // Direction of movement
-                int dr = 0, dc = 0;
-                if (mv.end_row > mv.start_row) dr = 1;
-                else if (mv.end_row < mv.start_row) dr = -1;
-                if (mv.end_col > mv.start_col) dc = 1;
-                else if (mv.end_col < mv.start_col) dc = -1;
-
-                // Move tile back to one step from start
-                int first_step_r = mv.start_row + dr;
-                int first_step_c = mv.start_col + dc;
-
-                // Save original destination for slow mover before we fix the move
-                int orig_end_r = mv.end_row;
-                int orig_end_c = mv.end_col;
-
-                // Remove tile from its final destination on the board
-                Tile saved = board_.at(mv.end_row, mv.end_col);
-                board_.at(mv.end_row, mv.end_col).value = 0;
-                board_.at(mv.end_row, mv.end_col).passive = PassiveType::NONE;
-
-                // Place it one step from start
-                board_.at(first_step_r, first_step_c) = saved;
-
-                // Fix the move endpoint so animation matches the rewind
-                mv.end_row = first_step_r;
-                mv.end_col = first_step_c;
-
-                // Create slow mover state
-                SlowMoverState sm;
-                sm.current_row = first_step_r;
-                sm.current_col = first_step_c;
-                sm.dest_row = orig_end_r;
-                sm.dest_col = orig_end_c;
-                sm.dr = dr;
-                sm.dc = dc;
-                sm.value = saved.value;
-                sm.passive = saved.passive;
-                sm.active = true;
-                slow_movers_.push_back(sm);
-            }
-        }
     }
 
     // Step 9: Roll for passive triggers
@@ -344,6 +370,26 @@ std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
 
         // Check if next cell is occupied
         if (!board_.at(next_r, next_c).is_empty()) {
+            // If same value, merge instead of stopping
+            if (board_.at(next_r, next_c).is_numbered() &&
+                board_.at(next_r, next_c).value == sm.value) {
+                int new_value = sm.value * 2;
+
+                // Clear old position
+                board_.at(sm.current_row, sm.current_col).value = 0;
+                board_.at(sm.current_row, sm.current_col).passive = PassiveType::NONE;
+
+                // Update destination with merged value, keep A_LITTLE_SLOW
+                board_.at(next_r, next_c).value = new_value;
+                board_.at(next_r, next_c).passive = PassiveType::A_LITTLE_SLOW;
+
+                sm.active = false;
+                updates.push_back({sm.current_row, sm.current_col,
+                                  next_r, next_c,
+                                  new_value, true});
+                continue;
+            }
+
             sm.active = false;
             updates.push_back({sm.current_row, sm.current_col,
                               sm.current_row, sm.current_col,
