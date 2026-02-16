@@ -18,17 +18,17 @@ std::vector<PassiveCandidate> PassiveRoller::roll(
     if (eligible.empty()) return candidates;
 
     for (const auto& merge : merges) {
-        int chance = merge.new_value;  // e.g., 2+2=4 -> 4% chance
+        double chance = merge.new_value * 0.1;  // e.g., 2+2=4 -> 0.4%
 
         // Determine number of picks
-        int guaranteed = chance / 100;
-        int remainder = chance % 100;
+        int guaranteed = static_cast<int>(chance / 100.0);
+        double remainder = chance - (guaranteed * 100.0);
 
         int num_picks = guaranteed;
 
         // Roll for the remainder
-        if (remainder > 0) {
-            std::uniform_int_distribution<int> dist(0, 99);
+        if (remainder > 0.0) {
+            std::uniform_real_distribution<double> dist(0.0, 100.0);
             if (dist(rng_) < remainder) {
                 num_picks++;
             }
