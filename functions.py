@@ -682,7 +682,7 @@ def draw_passive_menu(g):
     overlay.fill((overlay_color.r, overlay_color.g, overlay_color.b, 160))
     g.render_surface.blit(overlay, (0, 0))
 
-    panel_w, panel_h = 700, 400
+    panel_w, panel_h = 1000, 600
     panel_x = (g.RENDER_WIDTH - panel_w) // 2
     panel_y = (g.RENDER_HEIGHT - panel_h) // 2
 

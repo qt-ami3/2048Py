@@ -16,7 +16,7 @@ std::string passive_name(PassiveType type) {
 std::string passive_description(PassiveType type) {
     switch (type) {
         case PassiveType::A_LITTLE_SLOW:
-            return "Tile moves one cell per turn along its path instead of instantly.";
+            return "it's okay, take your time";
         default: return "";
     }
 }

@@ -81,6 +81,7 @@ PYBIND11_MODULE(game2048_engine, m) {
     py::class_<GameEngine>(m, "GameEngine")
         .def(py::init<int, int>())
         .def("process_move", &GameEngine::process_move)
+        .def("set_tile", &GameEngine::set_tile, py::arg("row"), py::arg("col"), py::arg("value"), py::arg("passive_type") = 0)
         .def("assign_passive", &GameEngine::assign_passive)
         .def("place_bomb", &GameEngine::place_bomb)
         .def("place_freeze", &GameEngine::place_freeze)

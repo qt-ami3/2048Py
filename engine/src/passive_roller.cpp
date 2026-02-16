@@ -40,21 +40,16 @@ std::vector<PassiveCandidate> PassiveRoller::roll(
             }
         }
 
-        // Pick random tiles
-        for (int p = 0; p < num_picks; p++) {
-            // Re-fetch eligible each time (a tile already picked still counts as eligible
-            // for subsequent picks since we want independent rolls)
-            if (eligible.empty()) break;
-
+        // Only one passive per turn: if this roll succeeds, pick one tile and stop
+        if (num_picks > 0 && !eligible.empty()) {
             std::uniform_int_distribution<int> tile_dist(0, (int)eligible.size() - 1);
             int idx = tile_dist(rng_);
             auto [r, c] = eligible[idx];
 
-            // Validation: tile must be occupied and numbered (not bomb/powerup)
             if (board.at(r, c).is_numbered()) {
                 candidates.push_back({r, c, board.at(r, c).value});
+                return candidates;  // Stop rolling after first success
             }
-            // If it's empty or a bomb, the pick is simply discarded (no passive awarded)
         }
     }
 

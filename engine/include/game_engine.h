@@ -33,6 +33,7 @@ public:
 
     TurnResult process_move(const std::string& direction);
 
+    void set_tile(int row, int col, int value, int passive_type = 0);
     void assign_passive(int row, int col, int passive_type);
 
     void place_bomb(int row, int col);

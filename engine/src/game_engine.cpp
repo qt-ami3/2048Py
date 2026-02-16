@@ -6,6 +6,7 @@
 
 #include "game_engine.h"
 #include <algorithm>
+#include <climits>
 #include <cmath>
 
 GameEngine::GameEngine(int rows, int cols)
@@ -21,6 +22,17 @@ GameEngine::GameEngine(int rows, int cols)
 
 TurnResult GameEngine::process_move(const std::string& direction) {
     TurnResult result;
+
+    // Step 0: Record which tiles have A_LITTLE_SLOW before movement
+    std::set<std::pair<int,int>> pre_move_slow_positions;
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            if (board_.at(r, c).passive == PassiveType::A_LITTLE_SLOW &&
+                board_.at(r, c).is_numbered()) {
+                pre_move_slow_positions.insert({r, c});
+            }
+        }
+    }
 
     // Step 1: Build effective frozen set (frozen tiles + active slow mover positions)
     auto effective_frozen = get_effective_frozen();
@@ -78,13 +90,101 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         excluded.insert(result.spawned_tile);
     }
 
-    // Step 8: Check for slow tiles in moves and convert them
-    // After movement, check if any tiles that moved have A_LITTLE_SLOW passive.
-    // If so, we need to create slow movers for them.
-    // NOTE: The movement already happened instantly on the board. For slow tiles,
-    // we need to undo the instant move and set up gradual movement instead.
-    // This is done by detecting tiles with A_LITTLE_SLOW at their destination.
-    for (const auto& mv : result.moves) {
+    // Step 8: Handle A_LITTLE_SLOW tiles after movement
+    // Both merged and non-merged tiles with A_LITTLE_SLOW need to be rewound
+    // so they only advance 1 cell per turn.
+
+    // 8a: Handle merged tiles that inherited A_LITTLE_SLOW
+    for (auto& merge : result.merges) {
+        if (board_.at(merge.row, merge.col).passive != PassiveType::A_LITTLE_SLOW)
+            continue;
+
+        // Find all moves that contributed to this merge
+        std::vector<MoveInfo*> merge_moves;
+        for (auto& mv : result.moves) {
+            if (mv.end_row == merge.row && mv.end_col == merge.col)
+                merge_moves.push_back(&mv);
+        }
+
+        // Find the slow source tile closest to the merge position
+        int best_start_r = -1, best_start_c = -1;
+        int best_dist = INT_MAX;
+
+        for (auto* mv : merge_moves) {
+            if (pre_move_slow_positions.count({mv->start_row, mv->start_col})) {
+                int d = std::abs(mv->start_row - merge.row) +
+                        std::abs(mv->start_col - merge.col);
+                if (d < best_dist) {
+                    best_dist = d;
+                    best_start_r = mv->start_row;
+                    best_start_c = mv->start_col;
+                }
+            }
+        }
+
+        // Check if a slow source was already at the merge position (no move generated)
+        if (pre_move_slow_positions.count({merge.row, merge.col})) {
+            best_dist = 0;
+            best_start_r = merge.row;
+            best_start_c = merge.col;
+        }
+
+        // No rewind needed if closest slow source moved 0-1 cells
+        if (best_dist <= 1 || best_start_r < 0) continue;
+
+        // Direction of movement
+        int dr = 0, dc = 0;
+        if (merge.row > best_start_r) dr = 1;
+        else if (merge.row < best_start_r) dr = -1;
+        if (merge.col > best_start_c) dc = 1;
+        else if (merge.col < best_start_c) dc = -1;
+
+        // One step from the slow source's original position
+        int step_r = best_start_r + dr;
+        int step_c = best_start_c + dc;
+        int orig_r = merge.row;
+        int orig_c = merge.col;
+
+        // Rewind: move merged tile from compacted position to 1-step position
+        Tile saved = board_.at(orig_r, orig_c);
+        board_.at(orig_r, orig_c).value = 0;
+        board_.at(orig_r, orig_c).passive = PassiveType::NONE;
+        board_.at(step_r, step_c) = saved;
+
+        // Update merge info to reflect new position
+        merge.row = step_r;
+        merge.col = step_c;
+
+        // Update move endpoints
+        for (auto* mv : merge_moves) {
+            mv->end_row = step_r;
+            mv->end_col = step_c;
+        }
+
+        // Create slow mover to gradually reach the original target
+        SlowMoverState sm;
+        sm.current_row = step_r;
+        sm.current_col = step_c;
+        sm.dest_row = orig_r;
+        sm.dest_col = orig_c;
+        sm.dr = dr;
+        sm.dc = dc;
+        sm.value = saved.value;
+        sm.passive = saved.passive;
+        sm.active = true;
+        slow_movers_.push_back(sm);
+    }
+
+    // 8b: Handle non-merge tiles with A_LITTLE_SLOW
+    std::set<std::pair<int,int>> merge_positions;
+    for (const auto& m : result.merges) {
+        merge_positions.insert({m.row, m.col});
+    }
+    for (auto& mv : result.moves) {
+        // Skip tiles that ended at a merge position
+        if (merge_positions.count({mv.end_row, mv.end_col}))
+            continue;
+
         // Check if the tile at the destination has A_LITTLE_SLOW
         if (board_.at(mv.end_row, mv.end_col).passive == PassiveType::A_LITTLE_SLOW &&
             board_.at(mv.end_row, mv.end_col).is_numbered()) {
@@ -106,6 +206,10 @@ TurnResult GameEngine::process_move(const std::string& direction) {
                 int first_step_r = mv.start_row + dr;
                 int first_step_c = mv.start_col + dc;
 
+                // Save original destination for slow mover before we fix the move
+                int orig_end_r = mv.end_row;
+                int orig_end_c = mv.end_col;
+
                 // Remove tile from its final destination on the board
                 Tile saved = board_.at(mv.end_row, mv.end_col);
                 board_.at(mv.end_row, mv.end_col).value = 0;
@@ -114,12 +218,16 @@ TurnResult GameEngine::process_move(const std::string& direction) {
                 // Place it one step from start
                 board_.at(first_step_r, first_step_c) = saved;
 
+                // Fix the move endpoint so animation matches the rewind
+                mv.end_row = first_step_r;
+                mv.end_col = first_step_c;
+
                 // Create slow mover state
                 SlowMoverState sm;
                 sm.current_row = first_step_r;
                 sm.current_col = first_step_c;
-                sm.dest_row = mv.end_row;
-                sm.dest_col = mv.end_col;
+                sm.dest_row = orig_end_r;
+                sm.dest_col = orig_end_c;
                 sm.dr = dr;
                 sm.dc = dc;
                 sm.value = saved.value;
@@ -143,6 +251,11 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     }
 
     return result;
+}
+
+void GameEngine::set_tile(int row, int col, int value, int passive_type) {
+    board_.at(row, col).value = value;
+    board_.at(row, col).passive = static_cast<PassiveType>(passive_type);
 }
 
 void GameEngine::assign_passive(int row, int col, int passive_type) {
