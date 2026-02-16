@@ -315,6 +315,11 @@ std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
     for (auto& sm : slow_movers_) {
         if (!sm.active) continue;
 
+        // If this slow mover is frozen, skip its turn but keep it active
+        if (frozen_tiles_.count({sm.current_row, sm.current_col})) {
+            continue;
+        }
+
         int next_r = sm.current_row + sm.dr;
         int next_c = sm.current_col + sm.dc;
 
