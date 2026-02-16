@@ -22,13 +22,10 @@ GameEngine::GameEngine(int rows, int cols)
 TurnResult GameEngine::process_move(const std::string& direction) {
     TurnResult result;
 
-    // Step 1: Advance slow movers (one cell along their predetermined path)
-    result.slow_mover_updates = advance_slow_movers();
-
-    // Step 2: Build effective frozen set (frozen tiles + active slow mover positions)
+    // Step 1: Build effective frozen set (frozen tiles + active slow mover positions)
     auto effective_frozen = get_effective_frozen();
 
-    // Step 3: Execute movement
+    // Step 2: Execute movement (all normal tiles move first)
     MoveResult move_result;
     if (direction == "up")
         move_result = movement::move_up(board_, effective_frozen, slow_movers_);
@@ -38,6 +35,9 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         move_result = movement::move_left(board_, effective_frozen, slow_movers_);
     else if (direction == "right")
         move_result = movement::move_right(board_, effective_frozen, slow_movers_);
+
+    // Step 3: Advance slow movers (after all normal tiles have settled)
+    result.slow_mover_updates = advance_slow_movers();
 
     // Check if anything changed (board or slow movers moved)
     bool slow_movers_moved = !result.slow_mover_updates.empty();
