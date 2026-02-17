@@ -31,6 +31,9 @@ public:
     // Place a bomb (-1) in a random empty cell. Returns (-1,-1) if no space.
     std::pair<int,int> spawn_bomb();
 
+    // Place a snail (-2) in a random empty cell. Returns (-1,-1) if no space.
+    std::pair<int,int> spawn_snail();
+
     std::vector<std::pair<int,int>> empty_cells(const std::set<std::pair<int,int>>& excluded = {}) const;
     std::vector<std::pair<int,int>> occupied_numbered_cells(const std::set<std::pair<int,int>>& excluded = {}) const;
 

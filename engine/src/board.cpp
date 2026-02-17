@@ -65,6 +65,17 @@ std::pair<int,int> Board::spawn_bomb() {
     return {r, c};
 }
 
+std::pair<int,int> Board::spawn_snail() {
+    auto empties = empty_cells();
+    if (empties.empty()) return {-1, -1};
+
+    std::uniform_int_distribution<int> dist(0, (int)empties.size() - 1);
+    auto [r, c] = empties[dist(rng_)];
+    grid_[r][c].value = -2;
+    grid_[r][c].passive = PassiveType::NONE;
+    return {r, c};
+}
+
 std::vector<std::pair<int,int>> Board::empty_cells(const std::set<std::pair<int,int>>& excluded) const {
     std::vector<std::pair<int,int>> result;
     for (int r = 0; r < rows_; r++) {

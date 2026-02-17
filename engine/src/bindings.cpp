@@ -10,6 +10,7 @@
 #include "game_engine.h"
 #include "passive.h"
 #include "slow_mover.h"
+#include "random_mover.h"
 #include "movement.h"
 #include "passive_roller.h"
 
@@ -64,6 +65,18 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def_readonly("value", &SlowMoverState::value)
         .def_readonly("active", &SlowMoverState::active);
 
+    // RandomMoverUpdate
+    py::class_<RandomMoverUpdate>(m, "RandomMoverUpdate")
+        .def_readonly("old_row", &RandomMoverUpdate::old_row)
+        .def_readonly("old_col", &RandomMoverUpdate::old_col)
+        .def_readonly("new_row", &RandomMoverUpdate::new_row)
+        .def_readonly("new_col", &RandomMoverUpdate::new_col);
+
+    // RandomMoverState
+    py::class_<RandomMoverState>(m, "RandomMoverState")
+        .def_readonly("row", &RandomMoverState::row)
+        .def_readonly("col", &RandomMoverState::col);
+
     // TurnResult
     py::class_<TurnResult>(m, "TurnResult")
         .def_readonly("moves", &TurnResult::moves)
@@ -75,7 +88,8 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def_readonly("should_expand", &TurnResult::should_expand)
         .def_readonly("expand_direction", &TurnResult::expand_direction)
         .def_readonly("passive_candidates", &TurnResult::passive_candidates)
-        .def_readonly("slow_mover_updates", &TurnResult::slow_mover_updates);
+        .def_readonly("slow_mover_updates", &TurnResult::slow_mover_updates)
+        .def_readonly("random_mover_updates", &TurnResult::random_mover_updates);
 
     // GameEngine
     py::class_<GameEngine>(m, "GameEngine")
@@ -89,6 +103,7 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def("get_grid_values", &GameEngine::get_grid_values)
         .def("get_passive_map", &GameEngine::get_passive_map)
         .def("get_slow_movers", &GameEngine::get_slow_movers)
+        .def("get_random_movers", &GameEngine::get_random_movers)
         .def("rows", &GameEngine::rows)
         .def("cols", &GameEngine::cols)
         .def("score", &GameEngine::score)

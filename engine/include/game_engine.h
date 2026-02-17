@@ -10,6 +10,7 @@
 #include "movement.h"
 #include "passive_roller.h"
 #include "slow_mover.h"
+#include "random_mover.h"
 #include <vector>
 #include <set>
 #include <string>
@@ -25,6 +26,7 @@ struct TurnResult {
     std::string expand_direction;
     std::vector<PassiveCandidate> passive_candidates;
     std::vector<SlowMoverUpdate> slow_mover_updates;
+    std::vector<RandomMoverUpdate> random_mover_updates;
 };
 
 class GameEngine {
@@ -43,6 +45,7 @@ public:
     std::vector<int> get_grid_values() const;
     std::vector<std::tuple<int,int,int>> get_passive_map() const;
     std::vector<SlowMoverState> get_slow_movers() const;
+    std::vector<RandomMoverState> get_random_movers() const;
 
     int rows() const { return board_.rows(); }
     int cols() const { return board_.cols(); }
@@ -57,9 +60,11 @@ private:
     int tar_expand_;
     std::set<std::pair<int,int>> frozen_tiles_;
     std::vector<SlowMoverState> slow_movers_;
+    std::vector<RandomMoverState> random_movers_;
     PassiveRoller passive_roller_;
     std::mt19937 rng_;
 
     std::vector<SlowMoverUpdate> advance_slow_movers();
+    std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);
     std::set<std::pair<int,int>> get_effective_frozen() const;
 };

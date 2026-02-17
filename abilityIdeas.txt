@@ -7,5 +7,4 @@ added:
 pipe:
   a directional pipe that allows occupying nodes to traverse only one axis.
 
-function block:
-  allows use of python for scripting.
+

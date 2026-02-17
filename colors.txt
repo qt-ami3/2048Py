@@ -1,3 +1,4 @@
-1: gruvbox light
+1: gruvbox
 2: nord
-3: tokyo night
+3: scary forrest
+4: tokyo night

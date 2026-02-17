@@ -9,6 +9,7 @@ import numpy as np
 import pygame
 import moderngl
 import game2048_engine as engine
+import math
 
 # Color schemes for different expansion levels
 DEFAULT_COLORS = {
@@ -162,6 +163,76 @@ def get_color_scheme_for_expansion(tar_expand):
         return NORD_COLORS, NORD_UI
     else:
         return GRUVBOX_COLORS, GRUVBOX_UI
+
+# --- Particle System ---
+
+class Particle:
+    def __init__(self, x, y, vx, vy, color, size):
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
+        self.color = color
+        self.size = size
+        self.lifetime = 1.0  # Start at full opacity
+        self.decay_rate = rand.uniform(0.008, 0.015)  # Random decay for variety
+        # Randomly make squares (1:1 ratio) or rectangles (varying aspect ratios)
+        self.is_square = rand.choice([True, False])
+        if self.is_square:
+            self.width = size
+            self.height = size
+        else:
+            # Rectangles with random aspect ratios
+            aspect = rand.uniform(0.4, 2.5)
+            self.width = size * aspect
+            self.height = size
+
+    def update(self, dt, gravity=980):
+        """Update particle position and lifetime"""
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.vy += gravity * dt  # Apply gravity
+        self.lifetime -= self.decay_rate
+        return self.lifetime > 0  # Return True if still alive
+
+class ParticleSystem:
+    def __init__(self):
+        self.particles = []
+
+    def add_explosion(self, x, y, color, particle_count=30):
+        """Create an explosion of particles at position (x, y)"""
+        for _ in range(particle_count):
+            # Random angle in radians
+            angle = rand.uniform(0, 2 * math.pi)
+            # Random speed with variation
+            speed = rand.uniform(3000, 8000) #  particle speed
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            # Particle size variation
+            size = rand.uniform(4, 10)
+            self.particles.append(Particle(x, y, vx, vy, color, size))
+
+    def update(self, dt):
+        """Update all particles and remove dead ones"""
+        self.particles = [p for p in self.particles if p.update(dt)]
+
+    def draw(self, surface):
+        """Draw all particles"""
+        for p in self.particles:
+            if p.lifetime > 0:
+                # Calculate alpha based on lifetime
+                alpha = int(255 * min(1.0, p.lifetime))
+                color_with_alpha = (*p.color, alpha)
+                # Draw particle as a rectangle/square
+                w = int(p.width)
+                h = int(p.height)
+                particle_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+                pygame.draw.rect(particle_surf, color_with_alpha, (0, 0, w, h))
+                surface.blit(particle_surf, (int(p.x - w / 2), int(p.y - h / 2)))
+
+    def clear(self):
+        """Remove all particles"""
+        self.particles.clear()
 
 # Shader source code
 vertex_shader = '''
@@ -369,6 +440,15 @@ void main() {
 
 # --- Utility functions ---
 
+def get_snail_color(g):
+    """Get the current cycling color for snail tiles"""
+    # Color keys from 2 to 32768
+    color_keys = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+    # Calculate current index based on time
+    index = int(g.snail_color_time / g.snail_color_speed) % len(color_keys)
+    value = color_keys[index]
+    return get_tile_color(value)
+
 def get_tile_color(value):
     if value in COLORS:
         return COLORS[value]
@@ -502,16 +582,34 @@ def process_move(g, direction):
 
     sync_grid_from_engine(g)
 
-    g.animating = True
-    g.animation_progress = 0
+    # Phase 1: regular tile + slow mover animations
     g.moving_tiles = [(m.start_row, m.start_col, m.end_row, m.end_col, m.value, 0)
                       for m in result.moves]
     g.merging_tiles = [(m.row, m.col, m.new_value, 1.0) for m in result.merges]
 
-    # Slow mover updates animate as single-cell moves
     for u in result.slow_mover_updates:
         if u.old_row != u.new_row or u.old_col != u.new_col:
             g.moving_tiles.append((u.old_row, u.old_col, u.new_row, u.new_col, u.value, 0))
+
+    # Phase 2: snail animations play AFTER regular tiles finish
+    g.pending_snail_moves = []
+    for u in result.random_mover_updates:
+        if u.old_row != u.new_row or u.old_col != u.new_col:
+            # Only animate if destination isn't a bomb (bomb kills snail - particles handle it)
+            dest_value = g.playingGrid[u.new_row][u.new_col]
+            if dest_value != -1:
+                g.pending_snail_moves.append((u.old_row, u.old_col, u.new_row, u.new_col, -2, 0))
+
+    # Start animation (phase 1 if there are regular moves, else jump to phase 2)
+    if g.moving_tiles or g.merging_tiles:
+        g.animating = True
+        g.animation_progress = 0
+    elif g.pending_snail_moves:
+        # No regular moves — start snail animation directly
+        g.animating = True
+        g.animation_progress = 0
+        g.moving_tiles = g.pending_snail_moves
+        g.pending_snail_moves = []
 
     if result.spawned_tile[0] >= 0:
         g.new_tile_pos = tuple(result.spawned_tile)
@@ -523,6 +621,16 @@ def process_move(g, direction):
 
     # Queue passive candidates for menu
     g.pending_passives = [(c.row, c.col, c.tile_value) for c in result.passive_candidates]
+
+    # Create explosion particles for bomb-destroyed tiles
+    for r, c in result.bomb_destroyed:
+        # Calculate center position of the destroyed tile
+        center_x = g.start_x + c * g.square_size + g.square_size // 2
+        center_y = g.start_y + r * g.square_size + g.square_size // 2
+        # Use orange color for particles
+        particle_color = (255, 88, 0)  # #ff5800
+        # Add explosion particles
+        g.particle_system.add_explosion(center_x, center_y, particle_color, particle_count=40)
 
     g.frozen_tiles.clear()
 
@@ -562,11 +670,13 @@ def place_bomb_at_tile(g, r, c):
         print(f"Bomb placed at position ({r}, {c})")
 
 def place_freeze_on_tile(g, r, c):
-    if g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
+    # Can freeze numbered tiles (> 0) or snails (-2)
+    if (g.playingGrid[r][c] > 0 or g.playingGrid[r][c] == -2) and (r, c) not in g.frozen_tiles:
         g.engine.place_freeze(r, c)
         g.frozen_tiles.add((r, c))
         g.selecting_freeze_position = False
-        print(f"Tile at ({r}, {c}) frozen for 1 turn")
+        tile_type = "Snail" if g.playingGrid[r][c] == -2 else "Tile"
+        print(f"{tile_type} at ({r}, {c}) frozen for 1 turn")
 
 def update_color_transition(g):
     if not _color_transition['active']:
@@ -606,6 +716,10 @@ def update_color_transition(g):
     return _color_transition['active']
 
 def update_animations(g, dt):
+    # Always update particle system
+    if hasattr(g, 'particle_system'):
+        g.particle_system.update(dt)
+
     if g.grid_expanding:
         g.expand_progress += g.expand_speed
         if g.expand_progress >= 1.0:
@@ -642,6 +756,14 @@ def update_animations(g, dt):
         g.merging_tiles = []
         g.new_tile_pos = None
         g.new_tile_scale = 0
+
+        # Phase 2: animate snail moves after regular tiles have settled
+        if getattr(g, 'pending_snail_moves', None):
+            g.animating = True
+            g.animation_progress = 0
+            g.moving_tiles = g.pending_snail_moves
+            g.pending_snail_moves = []
+            return  # Defer expand/passive checks until snail animation finishes
 
         if g.pending_expand:
             g.pending_expand = False
@@ -775,11 +897,42 @@ def draw_passive_tooltip(g, r, c, passive_type):
 
     g.render_surface.blit(tooltip, (tx, ty))
 
-def draw_tile(g, r, c, value, scale=1.0, alpha=255):
+def draw_snail_tile(g, x, y, size):
+    """Draw a snail tile with layered images and color cycling"""
+    # Get current cycling color
+    snail_color_hex = get_snail_color(g)
+    snail_color = pygame.Color(snail_color_hex)
+
+    # Create tile surface with background color
+    tile_surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    pygame.draw.rect(tile_surface, snail_color, (0, 0, size, size))
+    pygame.draw.rect(tile_surface, UI_COLORS['border'], (0, 0, size, size), g.ui_config['tile_border_width'])
+
+    # Layer snail images if loaded
+    if g.snail_body and g.snail_shell:
+        snail_size = int(size * 0.8)
+        body_scaled = pygame.transform.smoothscale(g.snail_body, (snail_size, snail_size))
+        shell_scaled = pygame.transform.smoothscale(g.snail_shell, (snail_size, snail_size))
+
+        # Center the images
+        img_rect = body_scaled.get_rect(center=(size // 2, size // 2))
+
+        # Draw body first, then shell on top
+        tile_surface.blit(body_scaled, img_rect)
+        tile_surface.blit(shell_scaled, img_rect)
+
+    g.render_surface.blit(tile_surface, (x, y))
+
+def draw_tile(g, r, c, value, scale=1.0, alpha=255, is_snail=False):
     x = g.start_x + c * g.square_size
     y = g.start_y + r * g.square_size
 
-    if scale == 1.0 and alpha == 255 and value in g.tile_cache:
+    # Special rendering for snail tiles
+    if is_snail and scale == 1.0:
+        draw_snail_tile(g, x, y, g.square_size)
+        return
+
+    if scale == 1.0 and alpha == 255 and value in g.tile_cache and not is_snail:
         g.render_surface.blit(g.tile_cache[value], (x, y))
         return
 

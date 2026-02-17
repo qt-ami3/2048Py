@@ -121,6 +121,8 @@ g.frozen_tiles = set()
 g.hovered_tile = None
 
 g.bomb_image = None
+g.snail_body = None
+g.snail_shell = None
 # Shop state
 g.shop_open = True  # Start with shop open
 g.pending_shop = False
@@ -131,6 +133,15 @@ try:
 except:
     print("Warning: Could not load bomb.png")
 
+try:
+    g.snail_body = pygame.image.load("assets/sprites/snailBody.png")
+    g.snail_shell = pygame.image.load("assets/sprites/snailShell.png")
+    snail_size = int(g.square_size * 0.8)
+    g.snail_body = pygame.transform.scale(g.snail_body, (snail_size, snail_size))
+    g.snail_shell = pygame.transform.scale(g.snail_shell, (snail_size, snail_size))
+except:
+    print("Warning: Could not load snail images")
+
 # Animation variables
 g.animating = False
 g.animation_progress = 0
@@ -139,6 +150,13 @@ g.moving_tiles = []
 g.merging_tiles = []
 g.new_tile_pos = None
 g.new_tile_scale = 0
+
+# Snail color cycling
+g.snail_color_time = 0  # Timer for color cycling
+g.snail_color_speed = 0.5  # Seconds per color
+
+# Pending snail moves (phase 2 animation - snails move after other tiles)
+g.pending_snail_moves = []
 
 # Grid expansion animation
 g.grid_expanding = False
@@ -155,6 +173,9 @@ g.expand_direction = ""
 g.tile_cache = {}
 g._score_cache = {'text': None, 'surface': None}
 func.init_tile_cache(g)
+
+# Particle system for bomb explosions
+g.particle_system = func.ParticleSystem()
 
 # CRT Shader parameters
 g.crt_params = {
@@ -304,7 +325,7 @@ while running:
             if g.selecting_bomb_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] == 0:
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['accent_green'], (x, y, g.square_size, g.square_size))
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
-            elif g.selecting_freeze_position and g.hovered_tile == (r, c) and g.playingGrid[r][c] > 0 and (r, c) not in g.frozen_tiles:
+            elif g.selecting_freeze_position and g.hovered_tile == (r, c) and (g.playingGrid[r][c] > 0 or g.playingGrid[r][c] == -2) and (r, c) not in g.frozen_tiles:
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['accent_blue'], (x, y, g.square_size, g.square_size))
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
             elif is_new_cell:
@@ -321,6 +342,9 @@ while running:
             else:
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), g.ui_config['grid_border_width'])
 
+    # Update snail color timer
+    g.snail_color_time += dt
+
     # Draw tiles
     if not g.animating:
         # Static tiles: blit directly from cache (no threading needed)
@@ -328,9 +352,10 @@ while running:
             for c in range(g.cols):
                 value = g.playingGrid[r][c]
                 if value:
-                    func.draw_tile(g, r, c, value)
-                    # Draw passive indicator dot
-                    if (r, c) in g.passive_map:
+                    is_snail = (value == -2)
+                    func.draw_tile(g, r, c, value, is_snail=is_snail)
+                    # Draw passive indicator dot (but not for snails, they have custom rendering)
+                    if (r, c) in g.passive_map and not is_snail:
                         func.draw_passive_indicator(g, r, c)
     else:
         merging_positions = {(r, c) for r, c, _, _ in g.merging_tiles}
@@ -342,15 +367,17 @@ while running:
                 if value and (r, c) not in merging_positions and (r, c) != g.new_tile_pos:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in g.moving_tiles)
                     if not is_moving_destination or g.animation_progress >= 1.0:
-                        func.draw_tile(g, r, c, value)
-                        if (r, c) in g.passive_map:
+                        is_snail = (value == -2)
+                        func.draw_tile(g, r, c, value, is_snail=is_snail)
+                        if (r, c) in g.passive_map and not is_snail:
                             func.draw_passive_indicator(g, r, c)
 
         # Draw moving tiles from cache
         for sr, sc, er, ec, val, progress in g.moving_tiles:
             r_pos = func.lerp(sr, er, progress)
             c_pos = func.lerp(sc, ec, progress)
-            func.draw_tile(g, r_pos, c_pos, val)
+            is_snail = (val == -2)
+            func.draw_tile(g, r_pos, c_pos, val, is_snail=is_snail)
 
         # Draw merging tiles
         for mr, mc, mval, mscale in g.merging_tiles:
@@ -394,6 +421,9 @@ while running:
     # Restore start positions after expansion animation drawing
     if g.grid_expanding:
         g.start_x, g.start_y = _expand_real_sx, _expand_real_sy
+
+    # Draw particles (on top of tiles, under UI)
+    g.particle_system.draw(g.render_surface)
 
     if g.selecting_bomb_position:
         instruction_text = g.small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, func.UI_COLORS['accent_green'])

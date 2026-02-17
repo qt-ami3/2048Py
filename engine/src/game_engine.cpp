@@ -23,7 +23,7 @@ GameEngine::GameEngine(int rows, int cols)
 TurnResult GameEngine::process_move(const std::string& direction) {
     TurnResult result;
 
-    // Step 0: Record which tiles have A_LITTLE_SLOW before movement
+    // Step 0: Record which tiles have A_LITTLE_SLOW and which are snails before movement
     std::set<std::pair<int,int>> pre_move_slow_positions;
     for (int r = 0; r < board_.rows(); r++) {
         for (int c = 0; c < board_.cols(); c++) {
@@ -35,11 +35,58 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     }
 
     // Step 1: Build effective frozen set
-    // Freeze: user-frozen tiles + active slow movers + ALL A_LITTLE_SLOW tiles
-    // A_LITTLE_SLOW tiles are frozen during normal movement and advanced separately.
+    // Freeze: user-frozen tiles + active slow movers + ALL A_LITTLE_SLOW tiles + ALL snails
+    // A_LITTLE_SLOW tiles and snails are frozen during normal movement and advanced separately.
     auto effective_frozen = get_effective_frozen();
     for (const auto& pos : pre_move_slow_positions) {
         effective_frozen.insert(pos);
+    }
+    // Freeze all snail tiles
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            if (board_.at(r, c).is_snail()) {
+                effective_frozen.insert({r, c});
+            }
+        }
+    }
+
+    // Step 1.5: Pre-movement bomb-snail detonation.
+    // If a bomb is directly adjacent to a snail, it detonates the snail before
+    // normal tile movement, so tiles on the other side are not consumed instead.
+    {
+        std::vector<std::pair<int,int>> bomb_positions;
+        std::vector<std::pair<int,int>> snail_positions;
+        const std::vector<std::pair<int,int>> dirs4 = {{-1,0},{1,0},{0,-1},{0,1}};
+
+        for (int r = 0; r < board_.rows(); r++) {
+            for (int c = 0; c < board_.cols(); c++) {
+                if (board_.at(r, c).is_bomb()) {
+                    for (auto [dr, dc] : dirs4) {
+                        int nr = r + dr, nc = c + dc;
+                        if (nr >= 0 && nr < board_.rows() &&
+                            nc >= 0 && nc < board_.cols() &&
+                            board_.at(nr, nc).is_snail()) {
+                            bomb_positions.push_back({r, c});
+                            snail_positions.push_back({nr, nc});
+                            break;  // Each bomb detonates at most one snail
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < (int)bomb_positions.size(); i++) {
+            auto [br, bc] = bomb_positions[i];
+            auto [sr, sc] = snail_positions[i];
+            // Guard: both must still be present (no double-detonation)
+            if (board_.at(br, bc).is_bomb() && board_.at(sr, sc).is_snail()) {
+                board_.at(br, bc).value = 0;  // Consume bomb
+                board_.at(sr, sc).value = 0;  // Destroy snail
+                result.bomb_destroyed.insert({br, bc});
+                result.bomb_destroyed.insert({sr, sc});
+                effective_frozen.erase({sr, sc});  // Snail no longer a boundary
+            }
+        }
     }
 
     // Compute movement direction vector
@@ -225,9 +272,13 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         move_result.board_changed = true;
     }
 
-    // Check if anything changed (board or slow movers moved)
+    // Step 3.7: Advance SNAIL tiles (random movers) in a random direction
+    result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
+
+    // Check if anything changed (board or slow movers or random movers moved)
+    bool random_movers_moved = !result.random_mover_updates.empty();
     bool slow_movers_moved = !result.slow_mover_updates.empty();
-    if (!move_result.board_changed && !slow_movers_moved) {
+    if (!move_result.board_changed && !slow_movers_moved && !random_movers_moved) {
         result.board_changed = false;
         return result;
     }
@@ -235,7 +286,8 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     result.board_changed = true;
     result.moves = move_result.moves;
     result.merges = move_result.merges;
-    result.bomb_destroyed = move_result.bomb_destroyed;
+    // Merge both bomb_destroyed sets (regular movement + snail-bomb interactions)
+    result.bomb_destroyed.insert(move_result.bomb_destroyed.begin(), move_result.bomb_destroyed.end());
 
     // Step 4: Clear freeze (wears off after one move)
     frozen_tiles_.clear();
@@ -256,6 +308,9 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         if (sm.active) {
             excluded.insert({sm.current_row, sm.current_col});
         }
+    }
+    for (const auto& rm : random_movers_) {
+        excluded.insert({rm.row, rm.col});
     }
 
     // Step 7: Spawn a new tile
@@ -296,7 +351,7 @@ void GameEngine::place_bomb(int row, int col) {
 }
 
 void GameEngine::place_freeze(int row, int col) {
-    if (board_.at(row, col).is_numbered()) {
+    if (board_.at(row, col).is_numbered() || board_.at(row, col).is_snail()) {
         frozen_tiles_.insert({row, col});
     }
 }
@@ -326,13 +381,24 @@ void GameEngine::complete_expansion(const std::string& direction) {
             sm.current_row++;
             sm.dest_row++;
         }
+        for (auto& rm : random_movers_) {
+            rm.row++;
+        }
     } else if (direction == "left") {
         for (auto& sm : slow_movers_) {
             sm.current_col++;
             sm.dest_col++;
         }
+        for (auto& rm : random_movers_) {
+            rm.col++;
+        }
     }
     // "down" and "right" don't shift existing positions
+
+    // Spawn a snail after 2nd expansion (tar_expand > 2048)
+    if (tar_expand_ > 2048) {
+        board_.spawn_snail();
+    }
 }
 
 std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
@@ -430,6 +496,90 @@ std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
         slow_movers_.end());
 
     return updates;
+}
+
+std::vector<RandomMoverUpdate> GameEngine::advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed) {
+    std::vector<RandomMoverUpdate> updates;
+
+    // Update random_movers_ list based on current snail tiles (value == -2) on the board
+    random_movers_.clear();
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            if (board_.at(r, c).is_snail()) {
+                RandomMoverState rm;
+                rm.row = r;
+                rm.col = c;
+                random_movers_.push_back(rm);
+            }
+        }
+    }
+
+    // Move each snail in a random valid direction
+    for (auto& rm : random_movers_) {
+        // Skip if frozen by user
+        if (frozen_tiles_.count({rm.row, rm.col})) {
+            continue;
+        }
+
+        // Build list of valid directions (not out of bounds, empty or bomb)
+        std::vector<std::pair<int,int>> valid_dirs;
+        std::vector<std::pair<int,int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}}; // up, down, left, right
+
+        for (const auto& [dr, dc] : directions) {
+            int new_r = rm.row + dr;
+            int new_c = rm.col + dc;
+
+            // Check bounds
+            if (new_r < 0 || new_r >= board_.rows() || new_c < 0 || new_c >= board_.cols()) {
+                continue;
+            }
+
+            // Can move to empty cells or bombs (snail gets destroyed by bomb)
+            if (board_.at(new_r, new_c).is_empty() || board_.at(new_r, new_c).is_bomb()) {
+                valid_dirs.push_back({dr, dc});
+            }
+        }
+
+        // If no valid moves, stay in place
+        if (valid_dirs.empty()) {
+            continue;
+        }
+
+        // Pick a random valid direction
+        std::uniform_int_distribution<int> dir_dist(0, (int)valid_dirs.size() - 1);
+        auto [dr, dc] = valid_dirs[dir_dist(rng_)];
+
+        int new_r = rm.row + dr;
+        int new_c = rm.col + dc;
+
+        RandomMoverUpdate update;
+        update.old_row = rm.row;
+        update.old_col = rm.col;
+        update.new_row = new_r;
+        update.new_col = new_c;
+
+        // Check if moving into bomb
+        if (board_.at(new_r, new_c).is_bomb()) {
+            // Both snail and bomb are destroyed
+            board_.at(rm.row, rm.col).value = 0;   // Clear snail
+            board_.at(new_r, new_c).value = 0;      // Consume bomb
+            bomb_destroyed.insert({new_r, new_c});  // Particles at bomb/collision position
+        } else {
+            // Move snail to empty cell
+            board_.at(new_r, new_c).value = -2;  // Snail value
+            board_.at(rm.row, rm.col).value = 0;
+            rm.row = new_r;
+            rm.col = new_c;
+        }
+
+        updates.push_back(update);
+    }
+
+    return updates;
+}
+
+std::vector<RandomMoverState> GameEngine::get_random_movers() const {
+    return random_movers_;
 }
 
 std::set<std::pair<int,int>> GameEngine::get_effective_frozen() const {
