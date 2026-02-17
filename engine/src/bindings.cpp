@@ -89,7 +89,9 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def_readonly("expand_direction", &TurnResult::expand_direction)
         .def_readonly("passive_candidates", &TurnResult::passive_candidates)
         .def_readonly("slow_mover_updates", &TurnResult::slow_mover_updates)
-        .def_readonly("random_mover_updates", &TurnResult::random_mover_updates);
+        .def_readonly("random_mover_updates", &TurnResult::random_mover_updates)
+        .def_readonly("spawned_snail", &TurnResult::spawned_snail)
+        .def_readonly("snail_bomb_kills", &TurnResult::snail_bomb_kills);
 
     // GameEngine
     py::class_<GameEngine>(m, "GameEngine")

@@ -50,44 +50,14 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         }
     }
 
+    // Count snails before any killing steps (for respawn detection)
+    int snails_before = 0;
+    for (int r = 0; r < board_.rows(); r++)
+        for (int c = 0; c < board_.cols(); c++)
+            if (board_.at(r, c).is_snail()) snails_before++;
+
     // Step 1.5: Pre-movement bomb-snail detonation.
-    // If a bomb is directly adjacent to a snail, it detonates the snail before
-    // normal tile movement, so tiles on the other side are not consumed instead.
-    {
-        std::vector<std::pair<int,int>> bomb_positions;
-        std::vector<std::pair<int,int>> snail_positions;
-        const std::vector<std::pair<int,int>> dirs4 = {{-1,0},{1,0},{0,-1},{0,1}};
-
-        for (int r = 0; r < board_.rows(); r++) {
-            for (int c = 0; c < board_.cols(); c++) {
-                if (board_.at(r, c).is_bomb()) {
-                    for (auto [dr, dc] : dirs4) {
-                        int nr = r + dr, nc = c + dc;
-                        if (nr >= 0 && nr < board_.rows() &&
-                            nc >= 0 && nc < board_.cols() &&
-                            board_.at(nr, nc).is_snail()) {
-                            bomb_positions.push_back({r, c});
-                            snail_positions.push_back({nr, nc});
-                            break;  // Each bomb detonates at most one snail
-                        }
-                    }
-                }
-            }
-        }
-
-        for (int i = 0; i < (int)bomb_positions.size(); i++) {
-            auto [br, bc] = bomb_positions[i];
-            auto [sr, sc] = snail_positions[i];
-            // Guard: both must still be present (no double-detonation)
-            if (board_.at(br, bc).is_bomb() && board_.at(sr, sc).is_snail()) {
-                board_.at(br, bc).value = 0;  // Consume bomb
-                board_.at(sr, sc).value = 0;  // Destroy snail
-                result.bomb_destroyed.insert({br, bc});
-                result.bomb_destroyed.insert({sr, sc});
-                effective_frozen.erase({sr, sc});  // Snail no longer a boundary
-            }
-        }
-    }
+    detonate_adjacent_bombs(result, effective_frozen);
 
     // Compute movement direction vector
     int move_dr = 0, move_dc = 0;
@@ -106,6 +76,10 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         move_result = movement::move_left(board_, effective_frozen, slow_movers_);
     else if (direction == "right")
         move_result = movement::move_right(board_, effective_frozen, slow_movers_);
+
+    // Step 2.5: Post-movement bomb-snail detonation.
+    // A bomb may have slid up to a frozen snail during step 2 — detonate it now.
+    detonate_adjacent_bombs(result, effective_frozen);
 
     // Step 3: Advance existing slow movers (after normal tiles have settled)
     result.slow_mover_updates = advance_slow_movers();
@@ -275,6 +249,16 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     // Step 3.7: Advance SNAIL tiles (random movers) in a random direction
     result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
 
+    // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
+    if (tar_expand_ > 4096) {
+        int snails_after = 0;
+        for (int r = 0; r < board_.rows(); r++)
+            for (int c = 0; c < board_.cols(); c++)
+                if (board_.at(r, c).is_snail()) snails_after++;
+        if (snails_after < snails_before)
+            snail_respawn_timer_ = 3;
+    }
+
     // Check if anything changed (board or slow movers or random movers moved)
     bool random_movers_moved = !result.random_mover_updates.empty();
     bool slow_movers_moved = !result.slow_mover_updates.empty();
@@ -328,6 +312,26 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             result.should_expand = true;
             tar_expand_ *= 2;
             break;
+        }
+    }
+
+    // Snail respawn countdown
+    if (snail_respawn_timer_ > 0) {
+        snail_respawn_timer_--;
+        if (snail_respawn_timer_ == 0 && tar_expand_ > 4096) {
+            // Only spawn if no snail is already on the board
+            bool has_snail = false;
+            for (int r = 0; r < board_.rows() && !has_snail; r++)
+                for (int c = 0; c < board_.cols() && !has_snail; c++)
+                    if (board_.at(r, c).is_snail()) has_snail = true;
+            if (!has_snail) {
+                auto pos = board_.spawn_snail();
+                if (pos.first >= 0) {
+                    result.spawned_snail = pos;
+                } else {
+                    snail_respawn_timer_ = 1;  // retry next turn if board was full
+                }
+            }
         }
     }
 
@@ -395,9 +399,14 @@ void GameEngine::complete_expansion(const std::string& direction) {
     }
     // "down" and "right" don't shift existing positions
 
-    // Spawn a snail after 2nd expansion (tar_expand > 2048)
-    if (tar_expand_ > 2048) {
-        board_.spawn_snail();
+    // Spawn a snail starting from Scary Forest, but only if one isn't already on the board
+    if (tar_expand_ > 4096) {
+        bool has_snail = false;
+        for (int r = 0; r < board_.rows() && !has_snail; r++)
+            for (int c = 0; c < board_.cols() && !has_snail; c++)
+                if (board_.at(r, c).is_snail()) has_snail = true;
+        if (!has_snail)
+            board_.spawn_snail();
     }
 }
 
@@ -590,4 +599,48 @@ std::set<std::pair<int,int>> GameEngine::get_effective_frozen() const {
         }
     }
     return frozen;
+}
+
+void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen) {
+    const std::vector<std::pair<int,int>> dirs4 = {{-1,0},{1,0},{0,-1},{0,1}};
+
+    struct Detonation { int br, bc, tr, tc; bool target_is_snail; };
+    std::vector<Detonation> detonations;
+
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            if (!board_.at(r, c).is_bomb()) continue;
+            for (auto [dr, dc] : dirs4) {
+                int nr = r + dr, nc = c + dc;
+                if (nr < 0 || nr >= board_.rows() || nc < 0 || nc >= board_.cols()) continue;
+                bool is_snail = board_.at(nr, nc).is_snail();
+                // Bombs also destroy user-frozen regular tiles (freeze never protects from bombs)
+                bool is_frozen_tile = !is_snail &&
+                                      board_.at(nr, nc).is_numbered() &&
+                                      frozen_tiles_.count({nr, nc}) > 0;
+                if (is_snail || is_frozen_tile) {
+                    detonations.push_back({r, c, nr, nc, is_snail});
+                    break;
+                }
+            }
+        }
+    }
+
+    for (auto& det : detonations) {
+        if (!board_.at(det.br, det.bc).is_bomb()) continue;
+        bool target_ok = det.target_is_snail
+            ? board_.at(det.tr, det.tc).is_snail()
+            : board_.at(det.tr, det.tc).is_numbered() && frozen_tiles_.count({det.tr, det.tc}) > 0;
+        if (!target_ok) continue;
+
+        board_.at(det.br, det.bc).value = 0;
+        board_.at(det.tr, det.tc).value = 0;
+        board_.at(det.tr, det.tc).passive = PassiveType::NONE;
+        result.bomb_destroyed.insert({det.br, det.bc});
+        result.bomb_destroyed.insert({det.tr, det.tc});
+        effective_frozen.erase({det.tr, det.tc});
+        frozen_tiles_.erase({det.tr, det.tc});
+        if (det.target_is_snail)
+            result.snail_bomb_kills.insert({det.tr, det.tc});
+    }
 }

@@ -140,6 +140,42 @@ TOKYO_NIGHT_UI = {
     'panel': "#24283b",
 }
 
+SCARY_FOREST_COLORS = {
+    0: "#1a2a1a",
+    2: "#b5c4a0",
+    4: "#6a8c4e",
+    8: "#2d5a27",
+    16: "#7a5c3c",
+    32: "#5c3e28",
+    64: "#8b1a1a",
+    128: "#c41e3a",
+    256: "#d4c4a0",
+    512: "#c4a82a",
+    1024: "#4a1a6a",
+    2048: "#ff2222",
+    4096: "#d45020",
+    8192: "#7ab828",
+    16384: "#8a9a8a",
+    32768: "#c0d4c0",
+    -1: "#8b0000",
+}
+
+SCARY_FOREST_UI = {
+    'background': "#0a140a",
+    'border': "#4a6a2a",
+    'text': "#c8d8b0",
+    'text_dim': "#8a9a78",
+    'button_normal': "#3a5c2a",
+    'button_hover': "#5a8040",
+    'button_active': "#8b1a1a",
+    'button_disabled': "#1a2a1a",
+    'accent_green': "#6a9040",
+    'accent_red': "#8b1a1a",
+    'accent_blue': "#4a7060",
+    'overlay': "#0d180d",
+    'panel': "#1a2a1a",
+}
+
 # Active color scheme (starts with Gruvbox at tarExpand=2048)
 COLORS = {**GRUVBOX_COLORS}
 UI_COLORS = {**GRUVBOX_UI}
@@ -157,8 +193,10 @@ _color_transition = {
 }
 
 def get_color_scheme_for_expansion(tar_expand):
-    if tar_expand > 4096:
+    if tar_expand > 8192:
         return TOKYO_NIGHT_COLORS, TOKYO_NIGHT_UI
+    elif tar_expand > 4096:
+        return SCARY_FOREST_COLORS, SCARY_FOREST_UI
     elif tar_expand > 2048:
         return NORD_COLORS, NORD_UI
     else:
@@ -441,7 +479,7 @@ void main() {
 # --- Utility functions ---
 
 def get_snail_color(g):
-    """Get the current cycling color for snail tiles, with smooth fade between colors"""
+    """Get the current cycling color for snail tiles as an (r, g, b) tuple, smoothly interpolated."""
     color_keys = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
     t = g.snail_color_time / g.snail_color_speed
     index = int(t) % len(color_keys)
@@ -449,10 +487,11 @@ def get_snail_color(g):
     frac = t - int(t)
     ca = pygame.Color(get_tile_color(color_keys[index]))
     cb = pygame.Color(get_tile_color(color_keys[next_index]))
-    r = int(ca.r + (cb.r - ca.r) * frac)
-    gv = int(ca.g + (cb.g - ca.g) * frac)
-    b = int(ca.b + (cb.b - ca.b) * frac)
-    return '#{:02x}{:02x}{:02x}'.format(r, gv, b)
+    return (
+        int(ca.r + (cb.r - ca.r) * frac),
+        int(ca.g + (cb.g - ca.g) * frac),
+        int(ca.b + (cb.b - ca.b) * frac),
+    )
 
 def get_tile_color(value):
     if value in COLORS:
@@ -480,6 +519,8 @@ def update_color_scheme(g):
             scheme_name = "Gruvbox"
         elif new_colors == NORD_COLORS:
             scheme_name = "Nord"
+        elif new_colors == SCARY_FOREST_COLORS:
+            scheme_name = "Scary Forest"
         elif new_colors == TOKYO_NIGHT_COLORS:
             scheme_name = "Tokyo Night"
 
@@ -620,6 +661,13 @@ def process_move(g, direction):
         g.new_tile_pos = tuple(result.spawned_tile)
         g.new_tile_scale = 0
 
+    if result.spawned_snail[0] >= 0:
+        g.new_snail_pos = tuple(result.spawned_snail)
+        g.new_snail_scale = 0
+
+    # Track snails killed by adjacent bombs so they stay visible during phase 1
+    g.snail_bomb_kill_positions = {(r, c) for r, c in result.snail_bomb_kills}
+
     if result.should_expand:
         g.pending_expand = True
         update_color_scheme(g)
@@ -755,12 +803,18 @@ def update_animations(g, dt):
     if g.new_tile_pos and g.animation_progress > 0.7:
         g.new_tile_scale = min((g.animation_progress - 0.7) / 0.3, 1.0)
 
+    if getattr(g, 'new_snail_pos', None) and g.animation_progress > 0.7:
+        g.new_snail_scale = min((g.animation_progress - 0.7) / 0.3, 1.0)
+
     if g.animation_progress >= 1.0:
         g.animating = False
         g.moving_tiles = []
         g.merging_tiles = []
         g.new_tile_pos = None
         g.new_tile_scale = 0
+        g.new_snail_pos = None
+        g.new_snail_scale = 0
+        g.snail_bomb_kill_positions = set()
 
         # Phase 2: animate snail moves after regular tiles have settled
         if getattr(g, 'pending_snail_moves', None):
@@ -902,31 +956,25 @@ def draw_passive_tooltip(g, r, c, passive_type):
 
     g.render_surface.blit(tooltip, (tx, ty))
 
+def prepare_snail_surface(g, scale):
+    """Create a scaled snail tile surface for spawn animation"""
+    size = max(int(g.square_size * scale), 1)
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    pygame.draw.rect(surface, get_snail_color(g), (0, 0, size, size))
+    pygame.draw.rect(surface, UI_COLORS['border'], (0, 0, size, size), g.ui_config['tile_border_width'])
+    if g.snail_composite:
+        composite_size = int(size * 0.8)
+        if composite_size > 0:
+            scaled = pygame.transform.smoothscale(g.snail_composite, (composite_size, composite_size))
+            surface.blit(scaled, scaled.get_rect(center=(size // 2, size // 2)))
+    return surface
+
 def draw_snail_tile(g, x, y, size):
-    """Draw a snail tile with layered images and color cycling"""
-    # Get current cycling color
-    snail_color_hex = get_snail_color(g)
-    snail_color = pygame.Color(snail_color_hex)
-
-    # Create tile surface with background color
-    tile_surface = pygame.Surface((size, size), pygame.SRCALPHA)
-    pygame.draw.rect(tile_surface, snail_color, (0, 0, size, size))
-    pygame.draw.rect(tile_surface, UI_COLORS['border'], (0, 0, size, size), g.ui_config['tile_border_width'])
-
-    # Layer snail images if loaded
-    if g.snail_body and g.snail_shell:
-        snail_size = int(size * 0.8)
-        body_scaled = pygame.transform.smoothscale(g.snail_body, (snail_size, snail_size))
-        shell_scaled = pygame.transform.smoothscale(g.snail_shell, (snail_size, snail_size))
-
-        # Center the images
-        img_rect = body_scaled.get_rect(center=(size // 2, size // 2))
-
-        # Draw body first, then shell on top
-        tile_surface.blit(body_scaled, img_rect)
-        tile_surface.blit(shell_scaled, img_rect)
-
-    g.render_surface.blit(tile_surface, (x, y))
+    """Draw a snail tile directly onto render_surface (no intermediate allocation)"""
+    pygame.draw.rect(g.render_surface, get_snail_color(g), (x, y, size, size))
+    pygame.draw.rect(g.render_surface, UI_COLORS['border'], (x, y, size, size), g.ui_config['tile_border_width'])
+    if g.snail_composite:
+        g.render_surface.blit(g.snail_composite, g.snail_composite.get_rect(center=(x + size // 2, y + size // 2)))
 
 def draw_tile(g, r, c, value, scale=1.0, alpha=255, is_snail=False):
     x = g.start_x + c * g.square_size

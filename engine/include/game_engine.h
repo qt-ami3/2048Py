@@ -19,8 +19,10 @@ struct TurnResult {
     std::vector<MoveInfo> moves;
     std::vector<MergeInfo> merges;
     std::set<std::pair<int,int>> bomb_destroyed;
+    std::set<std::pair<int,int>> snail_bomb_kills;  // snail positions killed by adjacent bomb
     int points_gained = 0;
     std::pair<int,int> spawned_tile = {-1, -1};
+    std::pair<int,int> spawned_snail = {-1, -1};
     bool board_changed = false;
     bool should_expand = false;
     std::string expand_direction;
@@ -63,8 +65,10 @@ private:
     std::vector<RandomMoverState> random_movers_;
     PassiveRoller passive_roller_;
     std::mt19937 rng_;
+    int snail_respawn_timer_ = 0;
 
     std::vector<SlowMoverUpdate> advance_slow_movers();
     std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);
     std::set<std::pair<int,int>> get_effective_frozen() const;
+    void detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen);
 };

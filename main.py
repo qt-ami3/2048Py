@@ -121,8 +121,7 @@ g.frozen_tiles = set()
 g.hovered_tile = None
 
 g.bomb_image = None
-g.snail_body = None
-g.snail_shell = None
+g.snail_composite = None
 # Shop state
 g.shop_open = True  # Start with shop open
 g.pending_shop = False
@@ -134,11 +133,12 @@ except:
     print("Warning: Could not load bomb.png")
 
 try:
-    g.snail_body = pygame.image.load("assets/sprites/snailBody.png")
-    g.snail_shell = pygame.image.load("assets/sprites/snailShell.png")
     snail_size = int(g.square_size * 0.8)
-    g.snail_body = pygame.transform.scale(g.snail_body, (snail_size, snail_size))
-    g.snail_shell = pygame.transform.scale(g.snail_shell, (snail_size, snail_size))
+    body = pygame.transform.scale(pygame.image.load("assets/sprites/snailBody.png").convert_alpha(), (snail_size, snail_size))
+    shell = pygame.transform.scale(pygame.image.load("assets/sprites/snailShell.png").convert_alpha(), (snail_size, snail_size))
+    g.snail_composite = pygame.Surface((snail_size, snail_size), pygame.SRCALPHA)
+    g.snail_composite.blit(body, (0, 0))
+    g.snail_composite.blit(shell, (0, 0))
 except:
     print("Warning: Could not load snail images")
 
@@ -150,6 +150,9 @@ g.moving_tiles = []
 g.merging_tiles = []
 g.new_tile_pos = None
 g.new_tile_scale = 0
+g.new_snail_pos = None
+g.new_snail_scale = 0
+g.snail_bomb_kill_positions = set()
 
 # Snail color cycling
 g.snail_color_time = 0  # Timer for color cycling
@@ -366,7 +369,7 @@ while running:
         for r in range(g.rows):
             for c in range(g.cols):
                 value = g.playingGrid[r][c]
-                if value and (r, c) not in merging_positions and (r, c) != g.new_tile_pos:
+                if value and (r, c) not in merging_positions and (r, c) != g.new_tile_pos and (r, c) != g.new_snail_pos:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in g.moving_tiles)
                     is_pending_snail_dest = (r, c) in pending_snail_dests
                     if not is_moving_destination and not is_pending_snail_dest or g.animation_progress >= 1.0:
@@ -377,6 +380,10 @@ while running:
 
         # Draw snails at their source positions while waiting for phase 2 animation
         for sr, sc in pending_snail_srcs:
+            func.draw_tile(g, sr, sc, -2, is_snail=True)
+
+        # Draw bomb-killed snails as static tiles during phase 1 so they're visible during the bomb slide
+        for sr, sc in getattr(g, 'snail_bomb_kill_positions', set()):
             func.draw_tile(g, sr, sc, -2, is_snail=True)
 
         # Draw moving tiles from cache
@@ -408,6 +415,16 @@ while running:
                 y = g.start_y + nr * g.square_size
                 offset = (g.square_size - surface.get_width()) / 2
                 g.render_surface.blit(surface, (x + offset, y + offset))
+
+        # Draw snail respawn pop-in animation
+        if g.new_snail_pos and g.new_snail_scale > 0:
+            nr, nc = g.new_snail_pos
+            nscale = func.ease_out_cubic(g.new_snail_scale)
+            surface = func.prepare_snail_surface(g, nscale)
+            x = g.start_x + nc * g.square_size
+            y = g.start_y + nr * g.square_size
+            offset = (g.square_size - surface.get_width()) / 2
+            g.render_surface.blit(surface, (x + offset, y + offset))
 
     # Draw frozen tile overlay (blue tint)
     for (fr, fc) in g.frozen_tiles:
