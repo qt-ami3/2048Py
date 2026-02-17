@@ -359,6 +359,8 @@ while running:
                         func.draw_passive_indicator(g, r, c)
     else:
         merging_positions = {(r, c) for r, c, _, _ in g.merging_tiles}
+        pending_snail_dests = {(er, ec) for _, _, er, ec, _, _ in getattr(g, 'pending_snail_moves', [])}
+        pending_snail_srcs = [(sr, sc) for sr, sc, _, _, _, _ in getattr(g, 'pending_snail_moves', [])]
 
         # Draw static tiles from cache
         for r in range(g.rows):
@@ -366,11 +368,16 @@ while running:
                 value = g.playingGrid[r][c]
                 if value and (r, c) not in merging_positions and (r, c) != g.new_tile_pos:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in g.moving_tiles)
-                    if not is_moving_destination or g.animation_progress >= 1.0:
+                    is_pending_snail_dest = (r, c) in pending_snail_dests
+                    if not is_moving_destination and not is_pending_snail_dest or g.animation_progress >= 1.0:
                         is_snail = (value == -2)
                         func.draw_tile(g, r, c, value, is_snail=is_snail)
                         if (r, c) in g.passive_map and not is_snail:
                             func.draw_passive_indicator(g, r, c)
+
+        # Draw snails at their source positions while waiting for phase 2 animation
+        for sr, sc in pending_snail_srcs:
+            func.draw_tile(g, sr, sc, -2, is_snail=True)
 
         # Draw moving tiles from cache
         for sr, sc, er, ec, val, progress in g.moving_tiles:

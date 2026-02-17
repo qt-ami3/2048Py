@@ -1,0 +1,2 @@
+armor snail: takes 2 bombs to die.
+snail eggs: leaves egg at previous location spawns snail if not destoryed in following turn.

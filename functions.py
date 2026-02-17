@@ -441,13 +441,18 @@ void main() {
 # --- Utility functions ---
 
 def get_snail_color(g):
-    """Get the current cycling color for snail tiles"""
-    # Color keys from 2 to 32768
+    """Get the current cycling color for snail tiles, with smooth fade between colors"""
     color_keys = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
-    # Calculate current index based on time
-    index = int(g.snail_color_time / g.snail_color_speed) % len(color_keys)
-    value = color_keys[index]
-    return get_tile_color(value)
+    t = g.snail_color_time / g.snail_color_speed
+    index = int(t) % len(color_keys)
+    next_index = (index + 1) % len(color_keys)
+    frac = t - int(t)
+    ca = pygame.Color(get_tile_color(color_keys[index]))
+    cb = pygame.Color(get_tile_color(color_keys[next_index]))
+    r = int(ca.r + (cb.r - ca.r) * frac)
+    gv = int(ca.g + (cb.g - ca.g) * frac)
+    b = int(ca.b + (cb.b - ca.b) * frac)
+    return '#{:02x}{:02x}{:02x}'.format(r, gv, b)
 
 def get_tile_color(value):
     if value in COLORS:
