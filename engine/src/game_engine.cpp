@@ -142,9 +142,9 @@ TurnResult GameEngine::process_move(const std::string& direction) {
 
             int new_value = tile_value * 2;
 
-            // Record move and merge
-            move_result.moves.push_back({behind_r, behind_c, sr, sc, tile_value});
-            move_result.merges.push_back({sr, sc, new_value});
+            // Record move and merge (deferred to slow-tile animation phase)
+            result.slow_tile_moves.push_back({behind_r, behind_c, sr, sc, tile_value});
+            result.slow_tile_merges.push_back({sr, sc, new_value});
 
             // Consume behind tile
             board_.at(behind_r, behind_c).value = 0;
@@ -200,8 +200,8 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             board_.at(dest_r, dest_c).value = new_value;
             board_.at(dest_r, dest_c).passive = PassiveType::A_LITTLE_SLOW;
 
-            move_result.moves.push_back({sr, sc, dest_r, dest_c, tile_value});
-            move_result.merges.push_back({dest_r, dest_c, new_value});
+            result.slow_tile_moves.push_back({sr, sc, dest_r, dest_c, tile_value});
+            result.slow_tile_merges.push_back({dest_r, dest_c, new_value});
             move_result.board_changed = true;
         } else {
             // Move 1 cell to empty space
@@ -210,7 +210,7 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             board_.at(sr, sc).passive = PassiveType::NONE;
             board_.at(next_r, next_c) = saved;
 
-            move_result.moves.push_back({sr, sc, next_r, next_c, tile_value});
+            result.slow_tile_moves.push_back({sr, sc, next_r, next_c, tile_value});
             move_result.board_changed = true;
 
             // If destination is further than 1 cell, create slow mover

@@ -29,6 +29,8 @@ struct TurnResult {
     std::vector<PassiveCandidate> passive_candidates;
     std::vector<SlowMoverUpdate> slow_mover_updates;
     std::vector<RandomMoverUpdate> random_mover_updates;
+    std::vector<MoveInfo> slow_tile_moves;    // A_LITTLE_SLOW step-advance moves (step 3.5)
+    std::vector<MergeInfo> slow_tile_merges;  // merges from step 3.5
 };
 
 class GameEngine {
