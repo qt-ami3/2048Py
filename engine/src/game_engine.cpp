@@ -79,7 +79,9 @@ TurnResult GameEngine::process_move(const std::string& direction) {
 
     // Step 2.5: Post-movement bomb-snail detonation.
     // A bomb may have slid up to a frozen snail during step 2 — detonate it now.
-    detonate_adjacent_bombs(result, effective_frozen);
+    // Also check frozen tiles post-movement (not pre-movement, so bombs can
+    // participate in normal movement first before detonating frozen tiles).
+    detonate_adjacent_bombs(result, effective_frozen, true);
 
     // Step 3: Advance existing slow movers (after normal tiles have settled)
     result.slow_mover_updates = advance_slow_movers();
@@ -601,7 +603,7 @@ std::set<std::pair<int,int>> GameEngine::get_effective_frozen() const {
     return frozen;
 }
 
-void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen) {
+void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen, bool check_frozen_tiles) {
     const std::vector<std::pair<int,int>> dirs4 = {{-1,0},{1,0},{0,-1},{0,1}};
 
     struct Detonation { int br, bc, tr, tc; bool target_is_snail; };
@@ -615,7 +617,7 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<
                 if (nr < 0 || nr >= board_.rows() || nc < 0 || nc >= board_.cols()) continue;
                 bool is_snail = board_.at(nr, nc).is_snail();
                 // Bombs also destroy user-frozen regular tiles (freeze never protects from bombs)
-                bool is_frozen_tile = !is_snail &&
+                bool is_frozen_tile = check_frozen_tiles && !is_snail &&
                                       board_.at(nr, nc).is_numbered() &&
                                       frozen_tiles_.count({nr, nc}) > 0;
                 if (is_snail || is_frozen_tile) {

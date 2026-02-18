@@ -70,5 +70,5 @@ private:
     std::vector<SlowMoverUpdate> advance_slow_movers();
     std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);
     std::set<std::pair<int,int>> get_effective_frozen() const;
-    void detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen);
+    void detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen, bool check_frozen_tiles = false);
 };
