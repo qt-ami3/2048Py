@@ -712,6 +712,17 @@ def start_grid_expansion(g):
     g.grid_expanding = True
     g.expand_progress = 0
 
+    # Scale shop prices per expansion: 1st ×5 (+400%), 2nd ×2.5 (+150%), 3rd+ ×2.05 (+105%)
+    g.expansion_count += 1
+    if g.expansion_count == 1:
+        multiplier = 5.0
+    elif g.expansion_count == 2:
+        multiplier = 2.5
+    else:
+        multiplier = 2.05
+    for ability in g.abilities:
+        ability['cost'] = round(ability['cost'] * multiplier)
+
     g.pending_shop = True
     print(f"Grid expanded to {g.rows}x{g.cols}! (direction: {g.expand_direction})")
 

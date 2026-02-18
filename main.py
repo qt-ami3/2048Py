@@ -115,6 +115,7 @@ g.abilities = [
     {'name': 'Bomb', 'cost': 750, 'charges': 0, 'description': 'Destroy a tile'},
     {'name': 'Freeze', 'cost': 500, 'charges': 0, 'description': 'Hold tile 1 turn'},
 ]
+g.expansion_count = 0
 g.selecting_bomb_position = False
 g.selecting_freeze_position = False
 g.frozen_tiles = set()
