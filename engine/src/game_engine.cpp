@@ -83,6 +83,20 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     // participate in normal movement first before detonating frozen tiles).
     detonate_adjacent_bombs(result, effective_frozen, true);
 
+    // Step 2.6: Advance SNAIL tiles (random movers) in a random direction.
+    // Snails move after normal tiles and bombs have settled, but before slow tiles.
+    result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
+
+    // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
+    if (tar_expand_ > 4096) {
+        int snails_after = 0;
+        for (int r = 0; r < board_.rows(); r++)
+            for (int c = 0; c < board_.cols(); c++)
+                if (board_.at(r, c).is_snail()) snails_after++;
+        if (snails_after < snails_before)
+            snail_respawn_timer_ = 3;
+    }
+
     // Step 3: Advance existing slow movers (after normal tiles have settled)
     result.slow_mover_updates = advance_slow_movers();
 
@@ -246,19 +260,6 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         move_result.moves.push_back({adj_r, adj_c, sm.current_row, sm.current_col, old_adj_value});
         move_result.merges.push_back({sm.current_row, sm.current_col, new_value});
         move_result.board_changed = true;
-    }
-
-    // Step 3.7: Advance SNAIL tiles (random movers) in a random direction
-    result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
-
-    // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
-    if (tar_expand_ > 4096) {
-        int snails_after = 0;
-        for (int r = 0; r < board_.rows(); r++)
-            for (int c = 0; c < board_.cols(); c++)
-                if (board_.at(r, c).is_snail()) snails_after++;
-        if (snails_after < snails_before)
-            snail_respawn_timer_ = 3;
     }
 
     // Check if anything changed (board or slow movers or random movers moved)
