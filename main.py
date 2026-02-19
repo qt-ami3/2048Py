@@ -370,6 +370,9 @@ while running:
         merging_positions = {(r, c) for r, c, _, _ in g.merging_tiles}
         pending_slow_dests = {(er, ec) for _, _, er, ec, _, _ in getattr(g, 'pending_slow_moves', [])}
         pending_slow_srcs = [(sr, sc, val) for sr, sc, _, _, val, _ in getattr(g, 'pending_slow_moves', [])]
+        pending_snail_dests = {(er, ec) for _, _, er, ec, _, _ in getattr(g, 'pending_snail_moves', [])}
+        pending_snail_srcs = [(sr, sc) for sr, sc, _, _, _, _ in getattr(g, 'pending_snail_moves', [])]
+        phase = g.current_move_phase
 
         # Draw static tiles from cache
         for r in range(g.rows):
@@ -378,17 +381,25 @@ while running:
                 if value and (r, c) not in merging_positions and (r, c) != g.new_tile_pos and (r, c) != g.new_snail_pos:
                     is_moving_destination = any(er == r and ec == c for _, _, er, ec, _, _ in g.moving_tiles)
                     is_pending_slow_dest = (r, c) in pending_slow_dests
-                    if not is_moving_destination and not is_pending_slow_dest or g.animation_progress >= 1.0:
+                    # During phase 1, hide snail at its future position (shown at old pos instead)
+                    is_pending_snail_dest = phase == 1 and (r, c) in pending_snail_dests
+                    if not is_moving_destination and not is_pending_slow_dest and not is_pending_snail_dest or g.animation_progress >= 1.0:
                         is_snail = (value == -2)
                         func.draw_tile(g, r, c, value, is_snail=is_snail)
                         if (r, c) in g.passive_map and not is_snail:
                             func.draw_passive_indicator(g, r, c)
 
-        # Draw A_LITTLE_SLOW tiles at their pre-advance positions while waiting for phase 2
-        for sr, sc, val in pending_slow_srcs:
-            func.draw_tile(g, sr, sc, val)
+        # During phase 1: draw snails at their pre-move positions
+        if phase == 1:
+            for sr, sc in pending_snail_srcs:
+                func.draw_tile(g, sr, sc, -2, is_snail=True)
 
-        # Draw bomb-killed snails as static tiles during phase 1 so they're visible during the bomb slide
+        # During phases 1 and 2: draw slow tiles at their pre-advance positions
+        if phase <= 2:
+            for sr, sc, val in pending_slow_srcs:
+                func.draw_tile(g, sr, sc, val)
+
+        # Draw bomb-killed snails as static tiles so they're visible during the bomb slide
         for sr, sc in getattr(g, 'snail_bomb_kill_positions', set()):
             func.draw_tile(g, sr, sc, -2, is_snail=True)
 

@@ -640,38 +640,43 @@ def process_move(g, direction):
 
     sync_grid_from_engine(g)
 
-    # Phase 1: normal tiles + slow mover updates + snail (matches engine order)
+    # Phase 1: regular tiles only
     g.moving_tiles = [(m.start_row, m.start_col, m.end_row, m.end_col, m.value, 0)
                       for m in result.moves]
     g.merging_tiles = [(m.row, m.col, m.new_value, 1.0) for m in result.merges]
 
-    for u in result.slow_mover_updates:
-        if u.old_row != u.new_row or u.old_col != u.new_col:
-            g.moving_tiles.append((u.old_row, u.old_col, u.new_row, u.new_col, u.value, 0))
-
-    # Snails animate in phase 1 (they move before A_LITTLE_SLOW in engine)
+    # Phase 2: snail moves (after regular tiles settle)
+    g.pending_snail_moves = []
     for u in result.random_mover_updates:
         if u.old_row != u.new_row or u.old_col != u.new_col:
-            # Only animate if destination isn't a bomb (bomb kills snail - particles handle it)
             dest_value = g.playingGrid[u.new_row][u.new_col]
             if dest_value != -1:
-                g.moving_tiles.append((u.old_row, u.old_col, u.new_row, u.new_col, -2, 0))
+                g.pending_snail_moves.append((u.old_row, u.old_col, u.new_row, u.new_col, -2, 0))
 
-    # Phase 2: A_LITTLE_SLOW tile step-advances play AFTER phase 1 settles
-    g.pending_slow_moves = [(m.start_row, m.start_col, m.end_row, m.end_col, m.value, 0)
-                            for m in result.slow_tile_moves]
+    # Phase 3: active SlowMover advances + A_LITTLE_SLOW step-advances
+    g.pending_slow_moves = []
+    for u in result.slow_mover_updates:
+        if u.old_row != u.new_row or u.old_col != u.new_col:
+            g.pending_slow_moves.append((u.old_row, u.old_col, u.new_row, u.new_col, u.value, 0))
+    g.pending_slow_moves += [(m.start_row, m.start_col, m.end_row, m.end_col, m.value, 0)
+                              for m in result.slow_tile_moves]
     g.pending_slow_merges = [(m.row, m.col, m.new_value, 1.0) for m in result.slow_tile_merges]
 
-    # Start animation (phase 1 if there are moves, else jump straight to phase 2)
+    # Start animation at the earliest non-empty phase
     if g.moving_tiles or g.merging_tiles:
         g.animating = True
         g.animation_progress = 0
         g.current_move_phase = 1
-    elif g.pending_slow_moves or g.pending_slow_merges:
-        # No phase-1 moves — start slow-tile animation directly
+    elif g.pending_snail_moves:
         g.animating = True
         g.animation_progress = 0
         g.current_move_phase = 2
+        g.moving_tiles = [(sr, sc, er, ec, val, 0) for sr, sc, er, ec, val, _ in g.pending_snail_moves]
+        g.pending_snail_moves = []
+    elif g.pending_slow_moves or g.pending_slow_merges:
+        g.animating = True
+        g.animation_progress = 0
+        g.current_move_phase = 3
         g.moving_tiles = g.pending_slow_moves
         g.merging_tiles = g.pending_slow_merges
         g.pending_slow_moves = []
@@ -831,33 +836,64 @@ def update_animations(g, dt):
                 scale = 1.2 - (merge_progress - 0.5) * 0.4
             g.merging_tiles[i] = (r, c, val, scale)
 
-    if g.new_tile_pos and g.animation_progress > 0.7:
+    # Only animate new tile/snail spawn during the last movement phase
+    is_last_phase = (not getattr(g, 'pending_snail_moves', None) and
+                     not getattr(g, 'pending_slow_moves', None) and
+                     not getattr(g, 'pending_slow_merges', None))
+
+    if is_last_phase and g.new_tile_pos and g.animation_progress > 0.7:
         g.new_tile_scale = min((g.animation_progress - 0.7) / 0.3, 1.0)
 
-    if getattr(g, 'new_snail_pos', None) and g.animation_progress > 0.7:
+    if is_last_phase and getattr(g, 'new_snail_pos', None) and g.animation_progress > 0.7:
         g.new_snail_scale = min((g.animation_progress - 0.7) / 0.3, 1.0)
 
     if g.animation_progress >= 1.0:
+        phase_just_completed = g.current_move_phase
+
         g.animating = False
         g.moving_tiles = []
         g.merging_tiles = []
+        g.snail_bomb_kill_positions = set()
+        g.current_move_phase = 0
+
+        if phase_just_completed == 1:
+            # Phase 1 (regular) done → phase 2 (snail)
+            if getattr(g, 'pending_snail_moves', None):
+                g.animating = True
+                g.animation_progress = 0
+                g.current_move_phase = 2
+                g.moving_tiles = [(sr, sc, er, ec, val, 0)
+                                   for sr, sc, er, ec, val, _ in g.pending_snail_moves]
+                g.pending_snail_moves = []
+                return
+            # No snail → fall through to check phase 3
+            if getattr(g, 'pending_slow_moves', None) or getattr(g, 'pending_slow_merges', None):
+                g.animating = True
+                g.animation_progress = 0
+                g.current_move_phase = 3
+                g.moving_tiles = g.pending_slow_moves
+                g.merging_tiles = g.pending_slow_merges
+                g.pending_slow_moves = []
+                g.pending_slow_merges = []
+                return
+
+        elif phase_just_completed == 2:
+            # Phase 2 (snail) done → phase 3 (slow tiles)
+            if getattr(g, 'pending_slow_moves', None) or getattr(g, 'pending_slow_merges', None):
+                g.animating = True
+                g.animation_progress = 0
+                g.current_move_phase = 3
+                g.moving_tiles = g.pending_slow_moves
+                g.merging_tiles = g.pending_slow_merges
+                g.pending_slow_moves = []
+                g.pending_slow_merges = []
+                return
+
+        # All phases done — clean up spawn state and trigger post-move events
         g.new_tile_pos = None
         g.new_tile_scale = 0
         g.new_snail_pos = None
         g.new_snail_scale = 0
-        g.snail_bomb_kill_positions = set()
-        g.current_move_phase = 0
-
-        # Phase 2: animate A_LITTLE_SLOW step-advances after phase 1 settles
-        if getattr(g, 'pending_slow_moves', None) or getattr(g, 'pending_slow_merges', None):
-            g.animating = True
-            g.animation_progress = 0
-            g.current_move_phase = 2
-            g.moving_tiles = g.pending_slow_moves
-            g.merging_tiles = g.pending_slow_merges
-            g.pending_slow_moves = []
-            g.pending_slow_merges = []
-            return  # Defer expand/passive checks until slow-tile animation finishes
 
         if g.pending_expand:
             g.pending_expand = False
@@ -1304,8 +1340,8 @@ def draw_move_order_chart(g):
     # Steps: (step_num, label, detail, phases_that_activate_it)
     steps = [
         (1, "REGULAR TILES", "compact + merge",  (1,)),
-        (2, "SNAIL",         "random move",      (1,)),
-        (3, "SLOW TILES",    "1 step forward",   (2,)),
+        (2, "SNAIL",         "random move",      (2,)),
+        (3, "SLOW TILES",    "1 step forward",   (3,)),
         (4, "NEW TILE",      "random spawn",     ()),
     ]
 
