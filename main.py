@@ -394,10 +394,15 @@ while running:
             for sr, sc in pending_snail_srcs:
                 func.draw_tile(g, sr, sc, -2, is_snail=True)
 
-        # During phases 1 and 2: draw slow tiles at their pre-advance positions
+        # During phases 1 and 2: draw slow tiles at their pre-advance positions.
+        # Skip sources that are phase-1 moving-tile destinations — those are regular
+        # tiles that compacted next to a slow tile and will merge in phase 3.
+        # Drawing them now creates a ghost tile before the regular tile arrives.
         if phase <= 2:
+            moving_dests = {(er, ec) for _, _, er, ec, _, _ in g.moving_tiles}
             for sr, sc, val in pending_slow_srcs:
-                func.draw_tile(g, sr, sc, val)
+                if (sr, sc) not in moving_dests:
+                    func.draw_tile(g, sr, sc, val)
 
         # Draw bomb-killed snails as static tiles so they're visible during the bomb slide
         for sr, sc in getattr(g, 'snail_bomb_kill_positions', set()):
