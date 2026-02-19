@@ -164,6 +164,9 @@ g.snail_color_speed = 0.5  # Seconds per color
 # Pending snail moves (phase 2 animation - snails move after other tiles)
 g.pending_snail_moves = []
 
+# Move order chart phase tracking (0=idle, 1=regular+snail, 2=slow tiles)
+g.current_move_phase = 0
+
 # Grid expansion animation
 g.grid_expanding = False
 g.expand_progress = 0
@@ -451,6 +454,9 @@ while running:
 
     # Draw particles (on top of tiles, under UI)
     g.particle_system.draw(g.render_surface)
+
+    # Draw move order flowchart to the right of the grid
+    func.draw_move_order_chart(g)
 
     if g.selecting_bomb_position:
         instruction_text = g.small_font.render("Click an empty tile to place bomb (ESC to cancel)", True, func.UI_COLORS['accent_green'])

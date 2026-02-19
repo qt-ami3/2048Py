@@ -95,6 +95,13 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     // Snails move after normal tiles and bombs have settled, but before slow tiles.
     result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
 
+    // Track positions vacated by snails this turn (for cascade fill in step 3.5b).
+    std::set<std::pair<int,int>> snail_vacated;
+    for (const auto& u : result.random_mover_updates) {
+        if (u.old_row != u.new_row || u.old_col != u.new_col)
+            snail_vacated.insert({u.old_row, u.old_col});
+    }
+
     // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
     if (tar_expand_ > 4096) {
         int snails_after = 0;
@@ -211,6 +218,9 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             result.slow_tile_moves.push_back({sr, sc, dest_r, dest_c, tile_value});
             result.slow_tile_merges.push_back({dest_r, dest_c, new_value});
             move_result.board_changed = true;
+
+            // Slow tile vacated (sr, sc) — let regular tiles behind it follow in.
+            cascade_fill_behind(sr, sc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
         } else {
             // Move 1 cell to empty space
             Tile saved = board_.at(sr, sc);
@@ -235,7 +245,18 @@ TurnResult GameEngine::process_move(const std::string& direction) {
                 sm.active = true;
                 slow_movers_.push_back(sm);
             }
+
+            // Slow tile vacated (sr, sc) — let regular tiles behind it follow in.
+            cascade_fill_behind(sr, sc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
         }
+    }
+
+    // Step 3.5b: Cascade regular tiles into positions vacated by snails this turn.
+    // Tiles were blocked by frozen snails during step 2; now that snails have moved
+    // (step 2.6), those tiles can slide forward into the vacated cells.
+    for (const auto& [vr, vc] : snail_vacated) {
+        if (board_.at(vr, vc).is_empty())
+            cascade_fill_behind(vr, vc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
     }
 
     // Step 3.6: Check for merges between tiles and frozen slow movers.
@@ -674,5 +695,36 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<
         frozen_tiles_.erase({det.tr, det.tc});
         if (det.target_is_snail)
             result.snail_bomb_kills.insert({det.tr, det.tc});
+    }
+}
+
+void GameEngine::cascade_fill_behind(
+    int empty_r, int empty_c,
+    int dr, int dc,
+    const std::set<std::pair<int,int>>& skip,
+    std::vector<MoveInfo>& out_moves)
+{
+    int fill_r = empty_r, fill_c = empty_c;
+    while (true) {
+        int check_r = fill_r - dr, check_c = fill_c - dc;
+        if (check_r < 0 || check_r >= board_.rows() ||
+            check_c < 0 || check_c >= board_.cols()) break;
+
+        // Only move plain numbered tiles — skip slow tiles, snails, bombs, walls.
+        const Tile& ct = board_.at(check_r, check_c);
+        if (!ct.is_numbered()) break;
+        if (ct.passive == PassiveType::A_LITTLE_SLOW) break;
+        if (skip.count({check_r, check_c})) break;       // active slow mover
+        if (frozen_tiles_.count({check_r, check_c})) break;  // user-frozen
+
+        Tile saved = ct;
+        board_.at(check_r, check_c).value = 0;
+        board_.at(check_r, check_c).passive = PassiveType::NONE;
+        board_.at(fill_r, fill_c) = saved;
+
+        out_moves.push_back({check_r, check_c, fill_r, fill_c, saved.value});
+
+        fill_r = check_r;
+        fill_c = check_c;
     }
 }

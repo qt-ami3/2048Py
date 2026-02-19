@@ -74,4 +74,8 @@ private:
     std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);
     std::set<std::pair<int,int>> get_effective_frozen() const;
     void detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen, bool check_frozen_tiles = false);
+    // Slide regular tiles into a vacated cell, cascading backward along the movement axis.
+    void cascade_fill_behind(int empty_r, int empty_c, int dr, int dc,
+                             const std::set<std::pair<int,int>>& skip,
+                             std::vector<MoveInfo>& out_moves);
 };

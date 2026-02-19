@@ -666,10 +666,12 @@ def process_move(g, direction):
     if g.moving_tiles or g.merging_tiles:
         g.animating = True
         g.animation_progress = 0
+        g.current_move_phase = 1
     elif g.pending_slow_moves or g.pending_slow_merges:
         # No phase-1 moves — start slow-tile animation directly
         g.animating = True
         g.animation_progress = 0
+        g.current_move_phase = 2
         g.moving_tiles = g.pending_slow_moves
         g.merging_tiles = g.pending_slow_merges
         g.pending_slow_moves = []
@@ -844,11 +846,13 @@ def update_animations(g, dt):
         g.new_snail_pos = None
         g.new_snail_scale = 0
         g.snail_bomb_kill_positions = set()
+        g.current_move_phase = 0
 
         # Phase 2: animate A_LITTLE_SLOW step-advances after phase 1 settles
         if getattr(g, 'pending_slow_moves', None) or getattr(g, 'pending_slow_merges', None):
             g.animating = True
             g.animation_progress = 0
+            g.current_move_phase = 2
             g.moving_tiles = g.pending_slow_moves
             g.merging_tiles = g.pending_slow_merges
             g.pending_slow_moves = []
@@ -1243,6 +1247,106 @@ def handle_shop_click(g, mouse_pos):
         g.shop_open = False
         print(f"Shop closed. Score: {g.points}")
         return
+
+
+def _draw_step_icon(g, step_num, x, y, size):
+    """Draw the small icon for a flowchart step."""
+    if step_num == 1:
+        # Numbered tile
+        tile_color = pygame.Color(get_tile_color(1024))
+        pygame.draw.rect(g.render_surface, tile_color, (x, y, size, size))
+        pygame.draw.rect(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
+        t = g.small_font.render("1024", True, pygame.Color(UI_COLORS['text']))
+        g.render_surface.blit(t, t.get_rect(center=(x + size // 2, y + size // 2)))
+    elif step_num == 2:
+        # Snail sprite (or fallback ellipse)
+        if getattr(g, 'snail_composite', None):
+            g.render_surface.blit(pygame.transform.smoothscale(g.snail_composite, (size, size)), (x, y))
+        else:
+            pygame.draw.ellipse(g.render_surface, (60, 160, 80), (x, y, size, size))
+            pygame.draw.ellipse(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
+    elif step_num == 3:
+        # Slow tile: numbered tile + passive dot indicator
+        tile_color = pygame.Color(get_tile_color(1024))
+        pygame.draw.rect(g.render_surface, tile_color, (x, y, size, size))
+        pygame.draw.rect(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
+        pygame.draw.circle(g.render_surface, pygame.Color(UI_COLORS['accent_green']),
+                           (x + size - 8, y + size - 8), 7)
+    elif step_num == 4:
+        # New tile: numbered tile + plus sign
+        tile_color = pygame.Color(get_tile_color(1024))
+        pygame.draw.rect(g.render_surface, tile_color, (x, y, size, size))
+        pygame.draw.rect(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
+        cx, cy, arm = x + size // 2, y + size // 2, size // 4
+        pygame.draw.line(g.render_surface, pygame.Color(UI_COLORS['text']), (cx - arm, cy), (cx + arm, cy), 3)
+        pygame.draw.line(g.render_surface, pygame.Color(UI_COLORS['text']), (cx, cy - arm), (cx, cy + arm), 3)
+
+
+def draw_move_order_chart(g):
+    """Draw a vertical flowchart to the right of the grid showing tile move order."""
+    phase = getattr(g, 'current_move_phase', 0)
+
+    box_w  = 340
+    box_h  = 112
+    gap    = 54   # vertical space between boxes (arrow lives here)
+    pad    = 16
+    isize  = 56   # icon square size
+
+    chart_x = g.start_x + g.grid_width + 80
+    chart_y = g.start_y
+
+    # Title
+    title = g.font.render("TURN ORDER", True, pygame.Color(UI_COLORS['text']))
+    g.render_surface.blit(title, (chart_x, chart_y - 44))
+    pygame.draw.line(g.render_surface, pygame.Color(UI_COLORS['border']),
+                     (chart_x, chart_y - 8), (chart_x + box_w, chart_y - 8), 1)
+
+    # Steps: (step_num, label, detail, phases_that_activate_it)
+    steps = [
+        (1, "REGULAR TILES", "compact + merge",  (1,)),
+        (2, "SNAIL",         "random move",      (1,)),
+        (3, "SLOW TILES",    "1 step forward",   (2,)),
+        (4, "NEW TILE",      "random spawn",     ()),
+    ]
+
+    for i, (num, label, detail, active_phases) in enumerate(steps):
+        bx = chart_x
+        by = chart_y + i * (box_h + gap)
+        active = phase in active_phases
+
+        # Box background (semi-transparent panel)
+        bg = pygame.Color(UI_COLORS['panel'])
+        box_surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        if active:
+            ab = pygame.Color(UI_COLORS['accent_blue'])
+            box_surf.fill((min(bg.r + 25, 255), min(bg.g + 25, 255), min(bg.b + 35, 255), 230))
+        else:
+            box_surf.fill((bg.r, bg.g, bg.b, 190))
+        g.render_surface.blit(box_surf, (bx, by))
+
+        # Border
+        border_col = pygame.Color(UI_COLORS['accent_blue'] if active else UI_COLORS['border'])
+        pygame.draw.rect(g.render_surface, border_col, (bx, by, box_w, box_h), 3 if active else 1)
+
+        # Icon
+        _draw_step_icon(g, num, bx + pad, by + (box_h - isize) // 2, isize)
+
+        # Labels
+        tx = bx + pad + isize + pad
+        text_col  = pygame.Color(UI_COLORS['text'] if active else UI_COLORS['text'])
+        dim_col   = pygame.Color(UI_COLORS['text_dim'])
+        g.render_surface.blit(g.small_font.render(label,  True, text_col), (tx, by + 22))
+        g.render_surface.blit(g.small_font.render(detail, True, dim_col),  (tx, by + 54))
+
+        # Arrow to next box
+        if i < len(steps) - 1:
+            ax       = bx + box_w // 2
+            line_top = by + box_h + 6
+            line_bot = by + box_h + gap - 16
+            tip      = by + box_h + gap - 6
+            ac       = pygame.Color(UI_COLORS['border'])
+            pygame.draw.line(g.render_surface, ac, (ax, line_top), (ax, line_bot), 2)
+            pygame.draw.polygon(g.render_surface, ac, [(ax, tip), (ax - 10, line_bot), (ax + 10, line_bot)])
 
 
 def render_to_opengl(g):
