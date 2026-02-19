@@ -494,6 +494,8 @@ def get_snail_color(g):
     )
 
 def get_tile_color(value):
+    if value == -3:  # Wall tile - always grey, theme-independent
+        return "#4a4a55"
     if value in COLORS:
         return COLORS[value]
     if value > 0:
@@ -568,6 +570,16 @@ def init_tile_cache(g):
             text_rect = text.get_rect(center=(g.square_size // 2, g.square_size // 2))
             surface.blit(text, text_rect)
         g.tile_cache[value] = surface
+
+    # Wall tile (-3): grey square with subtle diagonal lines, no text
+    wall_surface = pygame.Surface((g.square_size, g.square_size), pygame.SRCALPHA)
+    pygame.draw.rect(wall_surface, pygame.Color("#4a4a55"), (0, 0, g.square_size, g.square_size))
+    stripe_color = (80, 80, 95, 180)
+    stripe_gap = max(g.square_size // 6, 4)
+    for i in range(-g.square_size, g.square_size * 2, stripe_gap):
+        pygame.draw.line(wall_surface, stripe_color, (i, 0), (i + g.square_size, g.square_size), 1)
+    pygame.draw.rect(wall_surface, UI_COLORS['border'], (0, 0, g.square_size, g.square_size), g.ui_config['tile_border_width'])
+    g.tile_cache[-3] = wall_surface
 
 def get_cached_score(g, score_value):
     text = f"Score: {score_value}"

@@ -68,6 +68,7 @@ private:
     PassiveRoller passive_roller_;
     std::mt19937 rng_;
     int snail_respawn_timer_ = 0;
+    int expand_count_ = 0;
 
     std::vector<SlowMoverUpdate> advance_slow_movers();
     std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);

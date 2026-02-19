@@ -49,6 +49,14 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             }
         }
     }
+    // Freeze all wall tiles (permanent immovable obstacles)
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            if (board_.at(r, c).is_wall()) {
+                effective_frozen.insert({r, c});
+            }
+        }
+    }
 
     // Count snails before any killing steps (for respawn detection)
     int snails_before = 0;
@@ -401,6 +409,27 @@ void GameEngine::complete_expansion(const std::string& direction) {
         }
     }
     // "down" and "right" don't shift existing positions
+
+    // Place a wall tile in the center of the new row/col on the first expansion
+    expand_count_++;
+    if (expand_count_ == 1) {
+        int wall_r, wall_c;
+        if (direction == "down") {
+            wall_r = board_.rows() - 1;
+            wall_c = board_.cols() / 2;
+        } else if (direction == "up") {
+            wall_r = 0;
+            wall_c = board_.cols() / 2;
+        } else if (direction == "right") {
+            wall_r = board_.rows() / 2;
+            wall_c = board_.cols() - 1;
+        } else { // "left"
+            wall_r = board_.rows() / 2;
+            wall_c = 0;
+        }
+        board_.at(wall_r, wall_c).value = -3;
+        board_.at(wall_r, wall_c).passive = PassiveType::NONE;
+    }
 
     // Spawn a snail starting from Scary Forest, but only if one isn't already on the board
     if (tar_expand_ > 4096) {

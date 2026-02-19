@@ -15,6 +15,7 @@ struct Tile {
     bool is_empty() const { return value == 0; }
     bool is_bomb() const { return value == -1; }
     bool is_snail() const { return value == -2; }
+    bool is_wall() const { return value == -3; }
     bool is_numbered() const { return value > 0; }
     bool has_passive() const { return passive != PassiveType::NONE; }
 };
