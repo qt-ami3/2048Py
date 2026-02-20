@@ -400,9 +400,20 @@ while running:
         # Drawing them now creates a ghost tile before the regular tile arrives.
         if phase <= 2:
             moving_dests = {(er, ec) for _, _, er, ec, _, _ in g.moving_tiles}
+            slow_src_set = {(sr, sc) for sr, sc, _ in pending_slow_srcs}
             for sr, sc, val in pending_slow_srcs:
                 if (sr, sc) not in moving_dests:
                     func.draw_tile(g, sr, sc, val)
+            # Slow tile merge destinations are hidden by pending_slow_dests (they hold
+            # post-merge values in playingGrid). Redraw with the pre-merge value so the
+            # slow tile stays visible during phases 1–2 instead of disappearing.
+            # Skip if position is also a pending_slow_src — that means the slow tile is
+            # moving away in phase 3 and pending_slow_srcs already draws it correctly.
+            for mr, mc, new_val, _ in getattr(g, 'pending_slow_merges', []):
+                if (mr, mc) not in slow_src_set:
+                    func.draw_tile(g, mr, mc, new_val // 2)
+                    if (mr, mc) in g.passive_map:
+                        func.draw_passive_indicator(g, mr, mc)
 
         # Draw bomb-killed snails as static tiles so they're visible during the bomb slide
         for sr, sc in getattr(g, 'snail_bomb_kill_positions', set()):

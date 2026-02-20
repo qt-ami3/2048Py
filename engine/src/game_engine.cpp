@@ -34,12 +34,31 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         }
     }
 
+    // Compute movement direction vector early — needed for behind-freeze in step 1.
+    int move_dr = 0, move_dc = 0;
+    if (direction == "up") move_dr = -1;
+    else if (direction == "down") move_dr = 1;
+    else if (direction == "left") move_dc = -1;
+    else if (direction == "right") move_dc = 1;
+
     // Step 1: Build effective frozen set
     // Freeze: user-frozen tiles + active slow movers + ALL A_LITTLE_SLOW tiles + ALL snails
     // A_LITTLE_SLOW tiles and snails are frozen during normal movement and advanced separately.
     auto effective_frozen = get_effective_frozen();
-    for (const auto& pos : pre_move_slow_positions) {
-        effective_frozen.insert(pos);
+    for (const auto& [sr, sc] : pre_move_slow_positions) {
+        effective_frozen.insert({sr, sc});
+        // Also freeze the tile immediately behind this slow tile (opposite the move direction)
+        // if it has the same value. Without this, [A:V, B:V, C:V_slow] pressing toward C
+        // merges A+B→2V in step 2, so step 3.5's behind-merge (B+C) never fires. Freezing B
+        // keeps it out of the segment so step 3.5 can perform the correct behind-merge.
+        int behind_r = sr - move_dr;
+        int behind_c = sc - move_dc;
+        if (behind_r >= 0 && behind_r < board_.rows() &&
+            behind_c >= 0 && behind_c < board_.cols() &&
+            board_.at(behind_r, behind_c).is_numbered() &&
+            board_.at(behind_r, behind_c).value == board_.at(sr, sc).value) {
+            effective_frozen.insert({behind_r, behind_c});
+        }
     }
     // Freeze all snail tiles
     for (int r = 0; r < board_.rows(); r++) {
@@ -67,13 +86,6 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     // Step 1.5: Pre-movement bomb-snail detonation.
     detonate_adjacent_bombs(result, effective_frozen);
 
-    // Compute movement direction vector
-    int move_dr = 0, move_dc = 0;
-    if (direction == "up") move_dr = -1;
-    else if (direction == "down") move_dr = 1;
-    else if (direction == "left") move_dc = -1;
-    else if (direction == "right") move_dc = 1;
-
     // Step 2: Execute movement (all normal tiles move; slow tiles are frozen)
     MoveResult move_result;
     if (direction == "up")
@@ -91,28 +103,7 @@ TurnResult GameEngine::process_move(const std::string& direction) {
     // participate in normal movement first before detonating frozen tiles).
     detonate_adjacent_bombs(result, effective_frozen, true);
 
-    // Step 2.6: Advance SNAIL tiles (random movers) in a random direction.
-    // Snails move after normal tiles and bombs have settled, but before slow tiles.
-    result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
-
-    // Track positions vacated by snails this turn (for cascade fill in step 3.5b).
-    std::set<std::pair<int,int>> snail_vacated;
-    for (const auto& u : result.random_mover_updates) {
-        if (u.old_row != u.new_row || u.old_col != u.new_col)
-            snail_vacated.insert({u.old_row, u.old_col});
-    }
-
-    // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
-    if (tar_expand_ > 4096) {
-        int snails_after = 0;
-        for (int r = 0; r < board_.rows(); r++)
-            for (int c = 0; c < board_.cols(); c++)
-                if (board_.at(r, c).is_snail()) snails_after++;
-        if (snails_after < snails_before)
-            snail_respawn_timer_ = 3;
-    }
-
-    // Step 3: Advance existing slow movers (after normal tiles have settled)
+    // Step 3: Advance existing slow movers.
     result.slow_mover_updates = advance_slow_movers();
 
     // Step 3.5: Advance A_LITTLE_SLOW tiles that aren't active slow movers.
@@ -186,7 +177,13 @@ TurnResult GameEngine::process_move(const std::string& direction) {
                 dest_r = scan_r;
                 dest_c = scan_c;
             } else if (board_.at(scan_r, scan_c).value == tile_value &&
-                       board_.at(scan_r, scan_c).is_numbered()) {
+                       board_.at(scan_r, scan_c).is_numbered() &&
+                       board_.at(scan_r, scan_c).passive != PassiveType::A_LITTLE_SLOW) {
+                // Only merge with non-slow tiles via forward scan.
+                // Slow-on-slow merges are handled exclusively by the behind-merge
+                // mechanism above, which processes tiles in the correct order
+                // (closest-to-wall first). This prevents wrong-pair merges when
+                // three same-value slow tiles are stacked.
                 dest_r = scan_r;
                 dest_c = scan_c;
                 dest_is_merge = true;
@@ -251,14 +248,6 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         }
     }
 
-    // Step 3.5b: Cascade regular tiles into positions vacated by snails this turn.
-    // Tiles were blocked by frozen snails during step 2; now that snails have moved
-    // (step 2.6), those tiles can slide forward into the vacated cells.
-    for (const auto& [vr, vc] : snail_vacated) {
-        if (board_.at(vr, vc).is_empty())
-            cascade_fill_behind(vr, vc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
-    }
-
     // Step 3.6: Check for merges between tiles and frozen slow movers.
     // A tile may have slid next to a frozen slow mover with the same value.
     for (auto& sm : slow_movers_) {
@@ -291,12 +280,48 @@ TurnResult GameEngine::process_move(const std::string& direction) {
         move_result.board_changed = true;
     }
 
-    // Check if anything changed (board or slow movers or random movers moved)
-    bool random_movers_moved = !result.random_mover_updates.empty();
-    bool slow_movers_moved = !result.slow_mover_updates.empty();
-    if (!move_result.board_changed && !slow_movers_moved && !random_movers_moved) {
-        result.board_changed = false;
-        return result;
+    // Step 3.7: Post-slow-advance bomb detonation.
+    // A slow tile may have moved adjacent to a bomb during step 3.5, or a bomb may have
+    // been sitting adjacent to a slow tile that wasn't caught at step 1.5/2.5.
+    detonate_adjacent_bombs(result, effective_frozen);
+
+    // Validity check: regular tiles, active slow movers, or A_LITTLE_SLOW tile advancement
+    // all constitute a valid player turn. Snail (random mover) movement alone must NOT
+    // grant a new tile spawn — otherwise players can fish for extra turns.
+    {
+        bool slow_movers_moved = !result.slow_mover_updates.empty();
+        if (!move_result.board_changed && !slow_movers_moved) {
+            result.board_changed = false;
+            return result;
+        }
+    }
+
+    // Step 2.6: Advance SNAIL tiles (random movers) — only on valid turns.
+    result.random_mover_updates = advance_random_movers(result.bomb_destroyed);
+
+    // Track positions vacated by snails this turn (for cascade fill in step 3.5b).
+    std::set<std::pair<int,int>> snail_vacated;
+    for (const auto& u : result.random_mover_updates) {
+        if (u.old_row != u.new_row || u.old_col != u.new_col)
+            snail_vacated.insert({u.old_row, u.old_col});
+    }
+
+    // Detect snail kills and arm respawn timer (Scary Forest and beyond only)
+    if (tar_expand_ > 4096) {
+        int snails_after = 0;
+        for (int r = 0; r < board_.rows(); r++)
+            for (int c = 0; c < board_.cols(); c++)
+                if (board_.at(r, c).is_snail()) snails_after++;
+        if (snails_after < snails_before)
+            snail_respawn_timer_ = 3;
+    }
+
+    // Step 3.5b: Cascade regular tiles into positions vacated by snails this turn.
+    // Tiles were blocked by frozen snails during step 2; now that snails have moved
+    // (step 2.6), those tiles can slide forward into the vacated cells.
+    for (const auto& [vr, vc] : snail_vacated) {
+        if (board_.at(vr, vc).is_empty())
+            cascade_fill_behind(vr, vc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
     }
 
     result.board_changed = true;
@@ -657,7 +682,7 @@ std::set<std::pair<int,int>> GameEngine::get_effective_frozen() const {
 void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen, bool check_frozen_tiles) {
     const std::vector<std::pair<int,int>> dirs4 = {{-1,0},{1,0},{0,-1},{0,1}};
 
-    struct Detonation { int br, bc, tr, tc; bool target_is_snail; };
+    struct Detonation { int br, bc, tr, tc; bool target_is_snail; bool target_is_slow; };
     std::vector<Detonation> detonations;
 
     for (int r = 0; r < board_.rows(); r++) {
@@ -671,8 +696,13 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<
                 bool is_frozen_tile = check_frozen_tiles && !is_snail &&
                                       board_.at(nr, nc).is_numbered() &&
                                       frozen_tiles_.count({nr, nc}) > 0;
-                if (is_snail || is_frozen_tile) {
-                    detonations.push_back({r, c, nr, nc, is_snail});
+                // Bombs destroy slow tiles — they are always frozen during step 2, so
+                // they can never be consumed by the segment processor. Handle them here.
+                bool is_slow_tile = !is_snail &&
+                                    board_.at(nr, nc).is_numbered() &&
+                                    board_.at(nr, nc).passive == PassiveType::A_LITTLE_SLOW;
+                if (is_snail || is_frozen_tile || is_slow_tile) {
+                    detonations.push_back({r, c, nr, nc, is_snail, is_slow_tile});
                     break;
                 }
             }
@@ -681,9 +711,16 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<
 
     for (auto& det : detonations) {
         if (!board_.at(det.br, det.bc).is_bomb()) continue;
-        bool target_ok = det.target_is_snail
-            ? board_.at(det.tr, det.tc).is_snail()
-            : board_.at(det.tr, det.tc).is_numbered() && frozen_tiles_.count({det.tr, det.tc}) > 0;
+        bool target_ok;
+        if (det.target_is_snail) {
+            target_ok = board_.at(det.tr, det.tc).is_snail();
+        } else if (det.target_is_slow) {
+            target_ok = board_.at(det.tr, det.tc).is_numbered() &&
+                        board_.at(det.tr, det.tc).passive == PassiveType::A_LITTLE_SLOW;
+        } else {
+            target_ok = board_.at(det.tr, det.tc).is_numbered() &&
+                        frozen_tiles_.count({det.tr, det.tc}) > 0;
+        }
         if (!target_ok) continue;
 
         board_.at(det.br, det.bc).value = 0;
@@ -693,6 +730,18 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<
         result.bomb_destroyed.insert({det.tr, det.tc});
         effective_frozen.erase({det.tr, det.tc});
         frozen_tiles_.erase({det.tr, det.tc});
+
+        // Remove the destroyed slow tile from slow_movers_ so it doesn't
+        // advance as a phantom on the next step.
+        if (det.target_is_slow) {
+            slow_movers_.erase(
+                std::remove_if(slow_movers_.begin(), slow_movers_.end(),
+                    [&det](const SlowMoverState& sm) {
+                        return sm.current_row == det.tr && sm.current_col == det.tc;
+                    }),
+                slow_movers_.end());
+        }
+
         if (det.target_is_snail)
             result.snail_bomb_kills.insert({det.tr, det.tc});
     }
