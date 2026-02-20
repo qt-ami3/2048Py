@@ -963,6 +963,9 @@ def draw_passive_menu(g):
         (int(engine.PassiveType.A_LITTLE_SLOW),
          engine.passive_name(engine.PassiveType.A_LITTLE_SLOW),
          engine.passive_description(engine.PassiveType.A_LITTLE_SLOW)),
+        (int(engine.PassiveType.CONTRARIAN),
+         engine.passive_name(engine.PassiveType.CONTRARIAN),
+         engine.passive_description(engine.PassiveType.CONTRARIAN)),
     ]
 
     buttons = []
@@ -992,12 +995,20 @@ def draw_passive_menu(g):
 def draw_passive_indicator(g, r, c):
     dot_x = g.start_x + c * g.square_size + g.square_size // 2
     dot_y = g.start_y + r * g.square_size + g.square_size - 12
-    pygame.draw.circle(g.render_surface, UI_COLORS['accent_green'], (dot_x, dot_y), 5)
+    passive_type = g.passive_map.get((r, c), 0)
+    is_slow = (passive_type & int(engine.PassiveType.A_LITTLE_SLOW)) != 0
+    is_contrarian = (passive_type & int(engine.PassiveType.CONTRARIAN)) != 0
+    if is_slow and is_contrarian:
+        pygame.draw.circle(g.render_surface, UI_COLORS['accent_green'], (dot_x - 6, dot_y), 4)
+        pygame.draw.circle(g.render_surface, UI_COLORS['accent_red'], (dot_x + 6, dot_y), 4)
+    elif is_contrarian:
+        pygame.draw.circle(g.render_surface, UI_COLORS['accent_red'], (dot_x, dot_y), 5)
+    else:
+        pygame.draw.circle(g.render_surface, UI_COLORS['accent_green'], (dot_x, dot_y), 5)
 
 def draw_passive_tooltip(g, r, c, passive_type):
-    ptype = engine.PassiveType(passive_type)
-    name = engine.passive_name(ptype)
-    desc = engine.passive_description(ptype)
+    name = engine.passive_name(passive_type)
+    desc = engine.passive_description(passive_type)
 
     mouse_pos = pygame.mouse.get_pos()
     mx = int(mouse_pos[0] * g.RENDER_WIDTH / g.display_width)
@@ -1302,12 +1313,14 @@ def _draw_step_icon(g, step_num, x, y, size):
             pygame.draw.ellipse(g.render_surface, (60, 160, 80), (x, y, size, size))
             pygame.draw.ellipse(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
     elif step_num == 3:
-        # Slow tile: numbered tile + passive dot indicator
+        # Passive tiles: numbered tile + green dot (slow) + red dot (contrarian)
         tile_color = pygame.Color(get_tile_color(1024))
         pygame.draw.rect(g.render_surface, tile_color, (x, y, size, size))
         pygame.draw.rect(g.render_surface, pygame.Color(UI_COLORS['border']), (x, y, size, size), 2)
         pygame.draw.circle(g.render_surface, pygame.Color(UI_COLORS['accent_green']),
-                           (x + size - 8, y + size - 8), 7)
+                           (x + 8, y + size - 8), 5)
+        pygame.draw.circle(g.render_surface, pygame.Color(UI_COLORS['accent_red']),
+                           (x + size - 8, y + size - 8), 5)
     elif step_num == 4:
         # New tile: numbered tile + plus sign
         tile_color = pygame.Color(get_tile_color(1024))
@@ -1341,7 +1354,7 @@ def draw_move_order_chart(g):
     steps = [
         (1, "REGULAR TILES", "compact + merge",  (1,)),
         (2, "SNAIL",         "random move",      (2,)),
-        (3, "SLOW TILES",    "1 step forward",   (3,)),
+        (3, "PASSIVE TILES",  "slow + contrarian", (3,)),
         (4, "NEW TILE",      "random spawn",     ()),
     ]
 

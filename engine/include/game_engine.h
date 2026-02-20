@@ -6,32 +6,14 @@
 
 #pragma once
 
-#include "board.h"
-#include "movement.h"
+#include "turn_result.h"
+#include "tile_behavior.h"
 #include "passive_roller.h"
-#include "slow_mover.h"
 #include "random_mover.h"
 #include <vector>
 #include <set>
 #include <string>
-
-struct TurnResult {
-    std::vector<MoveInfo> moves;
-    std::vector<MergeInfo> merges;
-    std::set<std::pair<int,int>> bomb_destroyed;
-    std::set<std::pair<int,int>> snail_bomb_kills;  // snail positions killed by adjacent bomb
-    int points_gained = 0;
-    std::pair<int,int> spawned_tile = {-1, -1};
-    std::pair<int,int> spawned_snail = {-1, -1};
-    bool board_changed = false;
-    bool should_expand = false;
-    std::string expand_direction;
-    std::vector<PassiveCandidate> passive_candidates;
-    std::vector<SlowMoverUpdate> slow_mover_updates;
-    std::vector<RandomMoverUpdate> random_mover_updates;
-    std::vector<MoveInfo> slow_tile_moves;    // A_LITTLE_SLOW step-advance moves (step 3.5)
-    std::vector<MergeInfo> slow_tile_merges;  // merges from step 3.5
-};
+#include <memory>
 
 class GameEngine {
 public:
@@ -70,11 +52,14 @@ private:
     int snail_respawn_timer_ = 0;
     int expand_count_ = 0;
 
+    // Registered passive behaviors, in advance-phase order.
+    // To add a new passive: implement TileBehavior and push_back in the constructor.
+    std::vector<std::unique_ptr<TileBehavior>> behaviors_;
+
     std::vector<SlowMoverUpdate> advance_slow_movers();
     std::vector<RandomMoverUpdate> advance_random_movers(std::set<std::pair<int,int>>& bomb_destroyed);
     std::set<std::pair<int,int>> get_effective_frozen() const;
     void detonate_adjacent_bombs(TurnResult& result, std::set<std::pair<int,int>>& effective_frozen, bool check_frozen_tiles = false);
-    // Slide regular tiles into a vacated cell, cascading backward along the movement axis.
     void cascade_fill_behind(int empty_r, int empty_c, int dr, int dc,
                              const std::set<std::pair<int,int>>& skip,
                              std::vector<MoveInfo>& out_moves);

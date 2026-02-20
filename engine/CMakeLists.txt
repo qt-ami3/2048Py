@@ -22,6 +22,8 @@ pybind11_add_module(game2048_engine
     src/passive_roller.cpp
     src/slow_mover.cpp
     src/random_mover.cpp
+    src/slow_behavior.cpp
+    src/contrarian_behavior.cpp
 )
 
 target_include_directories(game2048_engine PRIVATE include)

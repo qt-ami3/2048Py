@@ -22,10 +22,13 @@ PYBIND11_MODULE(game2048_engine, m) {
     // PassiveType enum
     py::enum_<PassiveType>(m, "PassiveType")
         .value("NONE", PassiveType::NONE)
-        .value("A_LITTLE_SLOW", PassiveType::A_LITTLE_SLOW);
+        .value("A_LITTLE_SLOW", PassiveType::A_LITTLE_SLOW)
+        .value("CONTRARIAN", PassiveType::CONTRARIAN);
 
     m.def("passive_name", &passive_name);
+    m.def("passive_name", [](int t) { return passive_name(static_cast<PassiveType>(t)); });
     m.def("passive_description", &passive_description);
+    m.def("passive_description", [](int t) { return passive_description(static_cast<PassiveType>(t)); });
 
     // MoveInfo
     py::class_<MoveInfo>(m, "MoveInfo")

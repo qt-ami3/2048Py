@@ -7,16 +7,21 @@
 #include "passive.h"
 
 std::string passive_name(PassiveType type) {
-    switch (type) {
-        case PassiveType::A_LITTLE_SLOW: return "A Little Slow";
-        default: return "None";
-    }
+    int bits = static_cast<int>(type);
+    bool is_slow = bits & static_cast<int>(PassiveType::A_LITTLE_SLOW);
+    bool is_contrarian = bits & static_cast<int>(PassiveType::CONTRARIAN);
+    if (is_slow && is_contrarian) return "Slow Contrarian";
+    if (is_slow) return "A Little Slow";
+    if (is_contrarian) return "Contrarian";
+    return "None";
 }
 
 std::string passive_description(PassiveType type) {
-    switch (type) {
-        case PassiveType::A_LITTLE_SLOW:
-            return "it's okay, take your time";
-        default: return "";
-    }
+    int bits = static_cast<int>(type);
+    bool is_slow = bits & static_cast<int>(PassiveType::A_LITTLE_SLOW);
+    bool is_contrarian = bits & static_cast<int>(PassiveType::CONTRARIAN);
+    if (is_slow && is_contrarian) return "slowly moves opposite to your input";
+    if (is_slow) return "it's okay, take your time";
+    if (is_contrarian) return "moves opposite to your input";
+    return "";
 }
