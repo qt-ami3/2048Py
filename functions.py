@@ -1293,6 +1293,8 @@ def handle_shop_click(g, mouse_pos):
     if dx <= mouse_x <= dx + dw and dy <= mouse_y <= dy + dh:
         g.shop_open = False
         print(f"Shop closed. Score: {g.points}")
+        if g.pending_passives:
+            open_next_passive_menu(g)
         return
 
 

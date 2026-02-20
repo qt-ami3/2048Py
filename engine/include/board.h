@@ -34,6 +34,9 @@ public:
     // Place a snail (-2) in a random empty cell. Returns (-1,-1) if no space.
     std::pair<int,int> spawn_snail();
 
+    // Place a wall/brick (-3) in a random empty cell. Returns (-1,-1) if no space.
+    std::pair<int,int> spawn_wall();
+
     std::vector<std::pair<int,int>> empty_cells(const std::set<std::pair<int,int>>& excluded = {}) const;
     std::vector<std::pair<int,int>> occupied_numbered_cells(const std::set<std::pair<int,int>>& excluded = {}) const;
 

@@ -253,6 +253,8 @@ void GameEngine::complete_expansion(const std::string& direction) {
         else                           { wall_r = board_.rows() / 2; wall_c = 0; }
         board_.at(wall_r, wall_c).value = -3;
         board_.at(wall_r, wall_c).passive = PassiveType::NONE;
+    } else {
+        board_.spawn_wall();
     }
 
     if (tar_expand_ > 4096) {
@@ -395,6 +397,7 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result,
     struct Detonation {
         int br, bc, tr, tc;
         bool target_is_snail;
+        bool target_is_wall;
         bool needs_slow_mover_cleanup;
         PassiveType target_passive;  // NONE means regular user-frozen tile
     };
@@ -408,7 +411,8 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result,
                 if (nr < 0 || nr >= board_.rows() || nc < 0 || nc >= board_.cols()) continue;
 
                 bool is_snail = board_.at(nr, nc).is_snail();
-                bool is_frozen_tile = check_frozen_tiles && !is_snail &&
+                bool is_wall  = board_.at(nr, nc).is_wall();
+                bool is_frozen_tile = check_frozen_tiles && !is_snail && !is_wall &&
                                       board_.at(nr, nc).is_numbered() &&
                                       frozen_tiles_.count({nr, nc}) > 0;
 
@@ -416,7 +420,7 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result,
                 bool is_behavior_tile = false;
                 bool needs_cleanup = false;
                 PassiveType target_passive = PassiveType::NONE;
-                if (!is_snail && board_.at(nr, nc).is_numbered()) {
+                if (!is_snail && !is_wall && board_.at(nr, nc).is_numbered()) {
                     for (auto& b : behaviors_) {
                         if (b->matches(board_.at(nr, nc).passive)) {
                             is_behavior_tile = true;
@@ -427,8 +431,8 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result,
                     }
                 }
 
-                if (is_snail || is_frozen_tile || is_behavior_tile) {
-                    detonations.push_back({r, c, nr, nc, is_snail, needs_cleanup, target_passive});
+                if (is_snail || is_wall || is_frozen_tile || is_behavior_tile) {
+                    detonations.push_back({r, c, nr, nc, is_snail, is_wall, needs_cleanup, target_passive});
                     break;
                 }
             }
@@ -441,6 +445,8 @@ void GameEngine::detonate_adjacent_bombs(TurnResult& result,
         bool target_ok;
         if (det.target_is_snail) {
             target_ok = board_.at(det.tr, det.tc).is_snail();
+        } else if (det.target_is_wall) {
+            target_ok = board_.at(det.tr, det.tc).is_wall();
         } else if (det.target_passive != PassiveType::NONE) {
             // Behavior tile: verify still present with the same passive.
             target_ok = board_.at(det.tr, det.tc).is_numbered() &&
