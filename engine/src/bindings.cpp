@@ -107,6 +107,7 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def("place_bomb", &GameEngine::place_bomb)
         .def("place_freeze", &GameEngine::place_freeze)
         .def("clear_freeze", &GameEngine::clear_freeze)
+        .def("switch_tiles", &GameEngine::switch_tiles)
         .def("get_grid_values", &GameEngine::get_grid_values)
         .def("get_passive_map", &GameEngine::get_passive_map)
         .def("get_slow_movers", &GameEngine::get_slow_movers)

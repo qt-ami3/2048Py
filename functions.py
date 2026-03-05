@@ -638,6 +638,7 @@ def process_move(g, direction):
     if not result.board_changed:
         return
 
+    g.switch_used_this_turn = False
     sync_grid_from_engine(g)
 
     # Phase 1: regular tiles only
@@ -766,6 +767,22 @@ def place_freeze_on_tile(g, r, c):
         g.selecting_freeze_position = False
         tile_type = "Snail" if g.playingGrid[r][c] == -2 else "Tile"
         print(f"{tile_type} at ({r}, {c}) frozen for 1 turn")
+
+def handle_switch_click(g, r, c):
+    if g.switch_source is None:
+        # Phase 1: select source — must be a non-empty tile
+        if g.playingGrid[r][c] != 0:
+            g.switch_source = (r, c)
+    else:
+        # Phase 2: select destination — can be any tile except the source itself
+        sr, sc = g.switch_source
+        if (r, c) != (sr, sc):
+            g.engine.switch_tiles(sr, sc, r, c)
+            sync_grid_from_engine(g)
+            g.selecting_switch_position = False
+            g.switch_source = None
+            g.switch_used_this_turn = True
+            print(f"Switch: moved tile from ({sr},{sc}) to ({r},{c})")
 
 def update_color_transition(g):
     if not _color_transition['active']:
@@ -1134,30 +1151,49 @@ def draw_button(g, x, y, width, height, text, charges, enabled, active=False):
 
     return is_hover and enabled and not active
 
+def ability_button_layout(g):
+    button_gap = 20
+    total_w = g.button_width * 3 + button_gap * 2
+    left_x = g.start_x + (g.grid_width - total_w) // 2
+    return {
+        'left_x':   left_x,
+        'mid_x':    left_x + g.button_width + button_gap,
+        'right_x':  left_x + (g.button_width + button_gap) * 2,
+        'btn_y':    g.menu_y + 30,
+        'gap':      button_gap,
+    }
+
 def handle_button_click(g, mouse_pos):
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width
     mouse_y = mouse_pos[1] * g.RENDER_HEIGHT / g.display_height
 
-    button_gap = 20
-    total_w = g.button_width * 2 + button_gap
-    btn_left_x = g.start_x + (g.grid_width - total_w) // 2
-    btn_right_x = btn_left_x + g.button_width + button_gap
-    btn_y = g.menu_y + 30
+    lay = ability_button_layout(g)
+    btn_y = lay['btn_y']
+    any_active = g.selecting_bomb_position or g.selecting_freeze_position or g.selecting_switch_position
 
     # Bomb button (left)
-    if btn_left_x <= mouse_x <= btn_left_x + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
-        if g.abilities[0]['charges'] > 0 and not g.selecting_bomb_position and not g.selecting_freeze_position:
+    if lay['left_x'] <= mouse_x <= lay['left_x'] + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
+        if g.abilities[0]['charges'] > 0 and not any_active:
             g.abilities[0]['charges'] -= 1
             g.selecting_bomb_position = True
             print(f"Bomb ability activated! Charges remaining: {g.abilities[0]['charges']}")
         return
 
-    # Freeze button (right)
-    if btn_right_x <= mouse_x <= btn_right_x + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
-        if g.abilities[1]['charges'] > 0 and not g.selecting_freeze_position and not g.selecting_bomb_position:
+    # Freeze button (middle)
+    if lay['mid_x'] <= mouse_x <= lay['mid_x'] + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
+        if g.abilities[1]['charges'] > 0 and not any_active:
             g.abilities[1]['charges'] -= 1
             g.selecting_freeze_position = True
             print(f"Freeze ability activated! Charges remaining: {g.abilities[1]['charges']}")
+        return
+
+    # Switch button (right)
+    if lay['right_x'] <= mouse_x <= lay['right_x'] + g.button_width and btn_y <= mouse_y <= btn_y + g.button_height:
+        if g.abilities[2]['charges'] > 0 and not any_active and not g.switch_used_this_turn:
+            g.abilities[2]['charges'] -= 1
+            g.selecting_switch_position = True
+            g.switch_source = None
+            print(f"Switch ability activated! Charges remaining: {g.abilities[2]['charges']}")
         return
 
 def get_tile_from_mouse(g, mouse_pos):

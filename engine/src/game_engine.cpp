@@ -221,6 +221,22 @@ void GameEngine::clear_freeze(int row, int col) {
     frozen_tiles_.erase({row, col});
 }
 
+void GameEngine::switch_tiles(int r1, int c1, int r2, int c2) {
+    std::swap(board_.at(r1, c1), board_.at(r2, c2));
+
+    // Drop slow mover tracking for both positions — their trajectories no longer apply.
+    slow_movers_.erase(
+        std::remove_if(slow_movers_.begin(), slow_movers_.end(),
+            [&](const SlowMoverState& sm) {
+                return (sm.current_row == r1 && sm.current_col == c1) ||
+                       (sm.current_row == r2 && sm.current_col == c2);
+            }),
+        slow_movers_.end());
+
+    frozen_tiles_.erase({r1, c1});
+    frozen_tiles_.erase({r2, c2});
+}
+
 std::vector<int> GameEngine::get_grid_values() const {
     return board_.to_flat_values();
 }

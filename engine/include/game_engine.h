@@ -27,6 +27,7 @@ public:
     void place_bomb(int row, int col);
     void place_freeze(int row, int col);
     void clear_freeze(int row, int col);
+    void switch_tiles(int r1, int c1, int r2, int c2);
 
     std::vector<int> get_grid_values() const;
     std::vector<std::tuple<int,int,int>> get_passive_map() const;

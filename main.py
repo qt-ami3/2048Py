@@ -114,10 +114,14 @@ g.passive_menu_tile = None
 g.abilities = [
     {'name': 'Bomb', 'cost': 750, 'charges': 0, 'description': 'Destroy a tile'},
     {'name': 'Freeze', 'cost': 500, 'charges': 0, 'description': 'Hold tile 1 turn'},
+    {'name': 'Switch', 'cost': 600, 'charges': 0, 'description': 'Move any tile'},
 ]
 g.expansion_count = 0
 g.selecting_bomb_position = False
 g.selecting_freeze_position = False
+g.selecting_switch_position = False
+g.switch_source = None
+g.switch_used_this_turn = False
 g.frozen_tiles = set()
 g.hovered_tile = None
 
@@ -271,13 +275,18 @@ while running:
                         g.selecting_freeze_position = False
                         g.abilities[1]['charges'] += 1
                         print("Freeze cancelled. Charge refunded.")
+                    elif g.selecting_switch_position:
+                        g.selecting_switch_position = False
+                        g.switch_source = None
+                        g.abilities[2]['charges'] += 1
+                        print("Switch cancelled. Charge refunded.")
                     else:
                         running = False
                 case pygame.K_F11:
                     func.toggle_fullscreen(g)
 
         if event.type == pygame.MOUSEMOTION:
-            if g.selecting_bomb_position or g.selecting_freeze_position:
+            if g.selecting_bomb_position or g.selecting_freeze_position or g.selecting_switch_position:
                 g.hovered_tile = func.get_tile_from_mouse(g, event.pos)
 
         if event.type == pygame.MOUSEBUTTONDOWN and not g.animating and not g.grid_expanding:
@@ -292,6 +301,11 @@ while running:
                     if tile:
                         r, c = tile
                         func.place_freeze_on_tile(g, r, c)
+                elif g.selecting_switch_position:
+                    tile = func.get_tile_from_mouse(g, event.pos)
+                    if tile:
+                        r, c = tile
+                        func.handle_switch_click(g, r, c)
                 else:
                     func.handle_button_click(g, event.pos)
 
@@ -336,6 +350,18 @@ while running:
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
             elif g.selecting_freeze_position and g.hovered_tile == (r, c) and (g.playingGrid[r][c] > 0 or g.playingGrid[r][c] == -2) and (r, c) not in g.frozen_tiles:
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['accent_blue'], (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
+            elif g.selecting_switch_position and g.switch_source == (r, c):
+                # Highlight the selected source tile in gold
+                pygame.draw.rect(g.render_surface, (210, 170, 40), (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
+            elif g.selecting_switch_position and g.switch_source is None and g.hovered_tile == (r, c) and g.playingGrid[r][c] != 0:
+                # Phase 1 hover: valid source tile
+                pygame.draw.rect(g.render_surface, (200, 160, 50), (x, y, g.square_size, g.square_size))
+                pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
+            elif g.selecting_switch_position and g.switch_source is not None and g.hovered_tile == (r, c) and (r, c) != g.switch_source:
+                # Phase 2 hover: valid destination tile
+                pygame.draw.rect(g.render_surface, (50, 160, 100), (x, y, g.square_size, g.square_size))
                 pygame.draw.rect(g.render_surface, func.UI_COLORS['border'], (x, y, g.square_size, g.square_size), 4)
             elif is_new_cell:
                 # New cell stretches/fades in during expansion
@@ -469,7 +495,7 @@ while running:
             g.render_surface.blit(tint, (fx, fy))
 
     # Draw passive tooltip on hover (when not selecting an ability)
-    if not g.selecting_bomb_position and not g.selecting_freeze_position and not g.animating:
+    if not g.selecting_bomb_position and not g.selecting_freeze_position and not g.selecting_switch_position and not g.animating:
         mouse_pos = pygame.mouse.get_pos()
         hovered = func.get_tile_from_mouse(g, mouse_pos)
         if hovered and hovered in g.passive_map:
@@ -493,25 +519,35 @@ while running:
         instruction_text = g.small_font.render("Click a number tile to freeze it (ESC to cancel)", True, func.UI_COLORS['accent_blue'])
         instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
         g.render_surface.blit(instruction_text, instruction_rect)
+    elif g.selecting_switch_position:
+        if g.switch_source is None:
+            msg = "Click a tile to pick it up (ESC to cancel)"
+        else:
+            msg = "Click a destination tile (ESC to cancel)"
+        instruction_text = g.small_font.render(msg, True, (210, 170, 40))
+        instruction_rect = instruction_text.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y - 30))
+        g.render_surface.blit(instruction_text, instruction_rect)
     else:
         menu_title = g.font.render("ABILITIES", True, func.UI_COLORS['text'])
         menu_title_rect = menu_title.get_rect(center=(g.RENDER_WIDTH//2, g.menu_y))
         g.render_surface.blit(menu_title, menu_title_rect)
 
-    # Draw two ability buttons side by side
-    button_gap = 20
-    total_w = g.button_width * 2 + button_gap
-    btn_left_x = g.start_x + (g.grid_width - total_w) // 2
-    btn_right_x = btn_left_x + g.button_width + button_gap
-    btn_y = g.menu_y + 30
+    # Draw three ability buttons side by side
+    lay = func.ability_button_layout(g)
+    btn_y = lay['btn_y']
 
     bomb = g.abilities[0]
-    func.draw_button(g, btn_left_x, btn_y, g.button_width, g.button_height,
+    func.draw_button(g, lay['left_x'], btn_y, g.button_width, g.button_height,
                 "Bomb Tile", bomb['charges'], bomb['charges'] > 0, g.selecting_bomb_position)
 
     freeze = g.abilities[1]
-    func.draw_button(g, btn_right_x, btn_y, g.button_width, g.button_height,
+    func.draw_button(g, lay['mid_x'], btn_y, g.button_width, g.button_height,
                 "Freeze", freeze['charges'], freeze['charges'] > 0, g.selecting_freeze_position)
+
+    switch = g.abilities[2]
+    switch_enabled = switch['charges'] > 0 and not g.switch_used_this_turn
+    func.draw_button(g, lay['right_x'], btn_y, g.button_width, g.button_height,
+                "Switch", switch['charges'], switch_enabled, g.selecting_switch_position)
 
     # Draw shop overlay on top of everything
     if g.shop_open:
