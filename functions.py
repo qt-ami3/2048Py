@@ -919,10 +919,15 @@ def update_animations(g, dt):
             open_next_passive_menu(g)
 
 def open_next_passive_menu(g):
-    if g.pending_passives:
+    while g.pending_passives:
         r, c, val = g.pending_passives[0]
-        g.passive_menu_tile = (r, c)
-        g.passive_menu_open = True
+        if g.playingGrid[r][c] > 0:
+            g.passive_menu_tile = (r, c)
+            g.passive_menu_open = True
+            return
+        # Tile is gone — discard this stale candidate and try the next
+        g.pending_passives.pop(0)
+        print(f"Discarded stale passive candidate at ({r}, {c}): tile no longer present")
 
 def handle_passive_menu_click(g, mouse_pos):
     mouse_x = mouse_pos[0] * g.RENDER_WIDTH / g.display_width

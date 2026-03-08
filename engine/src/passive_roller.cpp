@@ -19,8 +19,14 @@ std::vector<PassiveCandidate> PassiveRoller::roll(
 {
     std::vector<PassiveCandidate> candidates;
 
-    // Get all eligible tiles (occupied, numbered, not excluded)
+    // Get all eligible tiles (occupied, numbered, not excluded, no existing passive)
     auto eligible = board.occupied_numbered_cells(excluded_positions);
+    eligible.erase(
+        std::remove_if(eligible.begin(), eligible.end(),
+            [&board](const std::pair<int,int>& p) {
+                return board.at(p.first, p.second).has_passive();
+            }),
+        eligible.end());
     if (eligible.empty()) return candidates;
 
     for (const auto& merge : merges) {

@@ -200,6 +200,7 @@ void GameEngine::set_tile(int row, int col, int value, int passive_type) {
 }
 
 void GameEngine::assign_passive(int row, int col, int passive_type) {
+    if (!board_.at(row, col).is_numbered()) return;
     int current = static_cast<int>(board_.at(row, col).passive);
     board_.at(row, col).passive = static_cast<PassiveType>(current | passive_type);
 }
