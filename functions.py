@@ -777,12 +777,17 @@ def handle_switch_click(g, r, c):
         # Phase 2: select destination — can be any tile except the source itself
         sr, sc = g.switch_source
         if (r, c) != (sr, sc):
-            g.engine.switch_tiles(sr, sc, r, c)
-            sync_grid_from_engine(g)
+            g.switch_anim_src = (sr, sc)
+            g.switch_anim_dst = (r, c)
+            g.switch_anim_src_val = g.playingGrid[sr][sc]
+            g.switch_anim_dst_val = g.playingGrid[r][c]
+            g.switch_animating = True
+            g.switch_anim_progress = 0.0
+            g.switch_anim_swapped = False
             g.selecting_switch_position = False
             g.switch_source = None
             g.switch_used_this_turn = True
-            print(f"Switch: moved tile from ({sr},{sc}) to ({r},{c})")
+            print(f"Switch: animating ({sr},{sc}) <-> ({r},{c})")
 
 def update_color_transition(g):
     if not _color_transition['active']:
@@ -825,6 +830,23 @@ def update_animations(g, dt):
     # Always update particle system
     if hasattr(g, 'particle_system'):
         g.particle_system.update(dt)
+
+    if getattr(g, 'switch_animating', False):
+        g.switch_anim_progress += g.switch_anim_speed
+        if g.switch_anim_progress >= 0.5 and not g.switch_anim_swapped:
+            sr, sc = g.switch_anim_src
+            dr, dc = g.switch_anim_dst
+            g.engine.switch_tiles(sr, sc, dr, dc)
+            sync_grid_from_engine(g)
+            g.switch_anim_swapped = True
+            print(f"Switch: moved tile from ({sr},{sc}) to ({dr},{dc})")
+        if g.switch_anim_progress >= 1.0:
+            g.switch_animating = False
+            g.switch_anim_progress = 0.0
+            g.switch_anim_src = None
+            g.switch_anim_dst = None
+            g.switch_anim_swapped = False
+        return
 
     if g.grid_expanding:
         g.expand_progress += g.expand_speed
@@ -1118,6 +1140,26 @@ def draw_tile(g, r, c, value, scale=1.0, alpha=255, is_snail=False):
         tile_surface.set_alpha(alpha)
 
     g.render_surface.blit(tile_surface, (x + offset, y + offset))
+
+def draw_tile_faded(g, r, c, value, alpha, is_snail=False):
+    """Draw a tile with whole-surface alpha (0-255). Used for switch fade animation."""
+    if not value:
+        return
+    x = g.start_x + int(c * g.square_size)
+    y = g.start_y + int(r * g.square_size)
+    sz = g.square_size
+    if is_snail:
+        surf = prepare_snail_surface(g, 1.0)
+    elif value in g.tile_cache:
+        surf = g.tile_cache[value]
+    else:
+        surf = prepare_tile_surface(g, value, 1.0)
+    temp = pygame.Surface((sz, sz))
+    bg = pygame.Color(COLORS[0])
+    temp.fill((bg.r, bg.g, bg.b))
+    temp.blit(surf, (0, 0))
+    temp.set_alpha(alpha)
+    g.render_surface.blit(temp, (x, y))
 
 def draw_button(g, x, y, width, height, text, charges, enabled, active=False):
     if enabled and not active:

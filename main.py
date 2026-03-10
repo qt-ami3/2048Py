@@ -122,6 +122,14 @@ g.selecting_freeze_position = False
 g.selecting_switch_position = False
 g.switch_source = None
 g.switch_used_this_turn = False
+g.switch_animating = False
+g.switch_anim_progress = 0.0
+g.switch_anim_speed = 0.04
+g.switch_anim_src = None
+g.switch_anim_dst = None
+g.switch_anim_src_val = 0
+g.switch_anim_dst_val = 0
+g.switch_anim_swapped = False
 g.frozen_tiles = set()
 g.hovered_tile = None
 
@@ -256,7 +264,7 @@ while running:
                     func.toggle_fullscreen(g)
             continue
 
-        if event.type == pygame.KEYDOWN and not g.animating and not g.grid_expanding:
+        if event.type == pygame.KEYDOWN and not g.animating and not g.grid_expanding and not g.switch_animating:
             match event.key:
                 case pygame.K_UP:
                     func.process_move(g, "up")
@@ -289,7 +297,7 @@ while running:
             if g.selecting_bomb_position or g.selecting_freeze_position or g.selecting_switch_position:
                 g.hovered_tile = func.get_tile_from_mouse(g, event.pos)
 
-        if event.type == pygame.MOUSEBUTTONDOWN and not g.animating and not g.grid_expanding:
+        if event.type == pygame.MOUSEBUTTONDOWN and not g.animating and not g.grid_expanding and not g.switch_animating:
             if event.button == 1:
                 if g.selecting_bomb_position:
                     tile = func.get_tile_from_mouse(g, event.pos)
@@ -380,6 +388,11 @@ while running:
     # Update snail color timer
     g.snail_color_time += dt
 
+    # Positions being handled by the switch fade animation (skip in normal draw)
+    switch_anim_positions = set()
+    if g.switch_animating and g.switch_anim_src and g.switch_anim_dst:
+        switch_anim_positions = {g.switch_anim_src, g.switch_anim_dst}
+
     # Draw tiles
     if not g.animating:
         # Static tiles: blit directly from cache (no threading needed)
@@ -387,6 +400,8 @@ while running:
             for c in range(g.cols):
                 value = g.playingGrid[r][c]
                 if value:
+                    if (r, c) in switch_anim_positions:
+                        continue  # drawn separately by switch fade
                     is_snail = (value == -2)
                     func.draw_tile(g, r, c, value, is_snail=is_snail)
                     # Draw passive indicator dot (but not for snails, they have custom rendering)
@@ -484,6 +499,23 @@ while running:
             y = g.start_y + nr * g.square_size
             offset = (g.square_size - surface.get_width()) / 2
             g.render_surface.blit(surface, (x + offset, y + offset))
+
+    # Draw switch fade animation (tiles fade out at old positions, fade in at new positions)
+    if g.switch_animating and g.switch_anim_src and g.switch_anim_dst:
+        p = g.switch_anim_progress
+        sr, sc = g.switch_anim_src
+        dr, dc = g.switch_anim_dst
+        if p < 0.5:
+            # Fade out: show original values fading toward transparent
+            alpha = int(255 * (1.0 - p * 2.0))
+            func.draw_tile_faded(g, sr, sc, g.switch_anim_src_val, alpha, g.switch_anim_src_val == -2)
+            func.draw_tile_faded(g, dr, dc, g.switch_anim_dst_val, alpha, g.switch_anim_dst_val == -2)
+        else:
+            # Fade in: show swapped values fading toward full opacity
+            alpha = int(255 * ((p - 0.5) * 2.0))
+            # After swap: src_val is now at dst pos, dst_val is now at src pos
+            func.draw_tile_faded(g, dr, dc, g.switch_anim_src_val, alpha, g.switch_anim_src_val == -2)
+            func.draw_tile_faded(g, sr, sc, g.switch_anim_dst_val, alpha, g.switch_anim_dst_val == -2)
 
     # Draw frozen tile overlay (blue tint)
     for (fr, fc) in g.frozen_tiles:
