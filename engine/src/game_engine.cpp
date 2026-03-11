@@ -175,6 +175,24 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             break;
         }
     }
+    if (!result.should_expand) {
+        for (const auto& m : result.slow_tile_merges) {
+            if (m.new_value == tar_expand_) {
+                result.should_expand = true;
+                tar_expand_ *= 2;
+                break;
+            }
+        }
+    }
+    if (!result.should_expand) {
+        for (const auto& u : result.slow_mover_updates) {
+            if (u.is_merge && u.value == tar_expand_) {
+                result.should_expand = true;
+                tar_expand_ *= 2;
+                break;
+            }
+        }
+    }
 
     if (snail_respawn_timer_ > 0) {
         snail_respawn_timer_--;
@@ -318,7 +336,7 @@ std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
                 board_.at(next_r, next_c).passive = sm.passive;
                 sm.active = false;
                 updates.push_back({sm.current_row, sm.current_col,
-                                   next_r, next_c, new_value, true});
+                                   next_r, next_c, new_value, true, true});
                 continue;
             }
             sm.active = false;

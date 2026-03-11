@@ -22,4 +22,5 @@ struct SlowMoverUpdate {
     int new_row, new_col;
     int value;
     bool finished;
+    bool is_merge = false;
 };
