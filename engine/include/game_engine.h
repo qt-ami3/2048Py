@@ -38,6 +38,7 @@ public:
     int cols() const { return board_.cols(); }
     int score() const { return score_; }
     int tar_expand() const { return tar_expand_; }
+    bool has_moves() const;
 
     void complete_expansion(const std::string& direction);
 

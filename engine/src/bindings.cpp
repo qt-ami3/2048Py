@@ -116,5 +116,6 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def("cols", &GameEngine::cols)
         .def("score", &GameEngine::score)
         .def("tar_expand", &GameEngine::tar_expand)
-        .def("complete_expansion", &GameEngine::complete_expansion);
+        .def("complete_expansion", &GameEngine::complete_expansion)
+        .def("has_moves", &GameEngine::has_moves);
 }

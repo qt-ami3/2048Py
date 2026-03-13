@@ -132,6 +132,7 @@ g.switch_anim_dst_val = 0
 g.switch_anim_swapped = False
 g.frozen_tiles = set()
 g.hovered_tile = None
+g.game_over = False
 
 g.bomb_image = None
 g.snail_composite = None
@@ -264,7 +265,7 @@ while running:
                     func.toggle_fullscreen(g)
             continue
 
-        if event.type == pygame.KEYDOWN and not g.animating and not g.grid_expanding and not g.switch_animating:
+        if event.type == pygame.KEYDOWN and not g.animating and not g.grid_expanding and not g.switch_animating and not g.game_over:
             match event.key:
                 case pygame.K_UP:
                     func.process_move(g, "up")
@@ -588,6 +589,10 @@ while running:
     # Draw passive menu overlay on top of everything
     if g.passive_menu_open:
         func.draw_passive_menu(g)
+
+    # Draw game over overlay
+    if g.game_over:
+        func.draw_game_over(g)
 
     # Render to OpenGL with CRT shader
     func.render_to_opengl(g)

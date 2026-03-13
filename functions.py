@@ -939,6 +939,9 @@ def update_animations(g, dt):
             start_grid_expansion(g)
         elif g.pending_passives:
             open_next_passive_menu(g)
+        elif not g.engine.has_moves():
+            g.game_over = True
+            print("Game over: no valid moves remaining.")
 
 def open_next_passive_menu(g):
     while g.pending_passives:
@@ -1255,6 +1258,30 @@ def get_tile_from_mouse(g, mouse_pos):
             return (r, c)
 
     return None
+
+def draw_game_over(g):
+    overlay = pygame.Surface((g.RENDER_WIDTH, g.RENDER_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    g.render_surface.blit(overlay, (0, 0))
+
+    panel_w, panel_h = 600, 300
+    panel_x = (g.RENDER_WIDTH - panel_w) // 2
+    panel_y = (g.RENDER_HEIGHT - panel_h) // 2
+
+    pygame.draw.rect(g.render_surface, UI_COLORS['panel'], (panel_x, panel_y, panel_w, panel_h))
+    pygame.draw.rect(g.render_surface, UI_COLORS['border'], (panel_x, panel_y, panel_w, panel_h), 3)
+
+    title = g.font.render("GAME OVER", True, UI_COLORS['text'])
+    title_rect = title.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 80))
+    g.render_surface.blit(title, title_rect)
+
+    score_line = g.font.render(f"Final Score: {g.points}", True, UI_COLORS['text'])
+    score_rect = score_line.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 150))
+    g.render_surface.blit(score_line, score_rect)
+
+    hint = g.small_font.render("No moves remaining", True, UI_COLORS['text'])
+    hint_rect = hint.get_rect(center=(g.RENDER_WIDTH // 2, panel_y + 210))
+    g.render_surface.blit(hint, hint_rect)
 
 def draw_shop(g):
     overlay = pygame.Surface((g.RENDER_WIDTH, g.RENDER_HEIGHT), pygame.SRCALPHA)

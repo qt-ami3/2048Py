@@ -417,6 +417,24 @@ std::vector<RandomMoverState> GameEngine::get_random_movers() const {
     return random_movers_;
 }
 
+bool GameEngine::has_moves() const {
+    for (int r = 0; r < board_.rows(); r++)
+        for (int c = 0; c < board_.cols(); c++)
+            if (board_.at(r, c).is_empty()) return true;
+
+    for (int r = 0; r < board_.rows(); r++) {
+        for (int c = 0; c < board_.cols(); c++) {
+            const Tile& t = board_.at(r, c);
+            if (!t.is_numbered()) continue;
+            if (c + 1 < board_.cols() && board_.at(r, c+1).is_numbered() && board_.at(r, c+1).value == t.value)
+                return true;
+            if (r + 1 < board_.rows() && board_.at(r+1, c).is_numbered() && board_.at(r+1, c).value == t.value)
+                return true;
+        }
+    }
+    return false;
+}
+
 std::set<std::pair<int,int>> GameEngine::get_effective_frozen() const {
     auto frozen = frozen_tiles_;
     for (const auto& sm : slow_movers_)

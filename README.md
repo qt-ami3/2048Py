@@ -30,11 +30,7 @@ source venv/bin/activate
 pip install pygame moderngl numpy pybind11 cmake
 
 # Build the C++ engine
-mkdir -p build && cd build
-cmake ../engine -Dpybind11_DIR=$(python3 -m pybind11 --cmakedir)
-make -j$(nproc)
-cp game2048_engine*.so ../
-cd ..
+bash compile.sh
 
 # Run
 source venv/bin/activate
@@ -43,26 +39,21 @@ python3 main.py
 
 ## Windows
 
-```powershell
-# Install Python from https://www.python.org/downloads/
-# Make sure "Add Python to PATH" is checked during install
-# Install Visual Studio Build Tools from https://visualstudio.microsoft.com/visual-cpp-build-tools/
-# (select "Desktop development with C++" workload)
+Install prerequisites:
+- [Python 3.10+](https://www.python.org/downloads/) — check "Add Python to PATH" during install
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — select the "Desktop development with C++" workload
+- [CMake](https://cmake.org/download/)
 
-# Create venv and install Python dependencies
+```bat
+REM Create venv and install Python dependencies
 python -m venv venv
 venv\Scripts\activate
 pip install pygame moderngl numpy pybind11 cmake
 
-# Build the C++ engine
-mkdir build
-cd build
-cmake ..\engine -Dpybind11_DIR=$(python -m pybind11 --cmakedir)
-cmake --build . --config Release
-copy Release\game2048_engine*.pyd ..
-cd ..
+REM Build the C++ engine
+compile.bat
 
-# Run
+REM Run
 venv\Scripts\activate
 python main.py
 ```
