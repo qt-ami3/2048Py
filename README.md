@@ -48,7 +48,7 @@ Install prerequisites:
 REM Create venv and install Python dependencies
 python -m venv venv
 venv\Scripts\activate
-pip install pygame moderngl numpy pybind11 cmake
+pip install pygame-ce moderngl numpy pybind11 cmake
 
 REM Build the C++ engine
 compile.bat
@@ -57,3 +57,7 @@ REM Run
 venv\Scripts\activate
 python main.py
 ```
+
+[^1]:
+    Kudos to @SheviTGP for his help testing and improving Windows instructions.
+[^1]
