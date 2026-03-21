@@ -1,8 +1,0 @@
-build/
-*.so
-*.pyd
-__pycache__/
-*.pyc
-venv/
-minimumPoints.txt
-.gitignore
