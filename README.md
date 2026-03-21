@@ -2,10 +2,9 @@
 
 With the latest changes; the moderngl version of the game should run at a playable framerate.
 
-![](images/sampleOne.png)
-![](images/sampleTwo.png)
-![](images/sampleThree.png)
-![](images/sampleFour.png)
+![](sample/sample0.png)
+![](sample/sample1.png)
+![](sample/sample2.png)
 
 ## Prerequisites
 
