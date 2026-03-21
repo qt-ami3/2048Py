@@ -13,7 +13,7 @@ With the latest changes; the moderngl version of the game should run at a playab
 - A C++ compiler (g++ on Linux, MSVC on Windows)
 - CMake
 
-Make sure you update the `NATIVE_WIDTH` & `NATIVE_HEIGHT` variables in `main.py` to match your native resolution.
+Make sure you update the `NATIVE_WIDTH` & `NATIVE_HEIGHT` variables in `src/main.py` to match your native resolution.
 
 ## Linux
 
@@ -25,17 +25,17 @@ sudo apt install python3 python3-pip python3-venv cmake g++
 sudo pacman -S python python-pip cmake gcc
 
 # Create venv and install Python dependencies
-python3 -m venv venv
-source venv/bin/activate
-pip install pygame moderngl numpy pybind11 cmake
+python3 -m venv src/venv
+src/venv/bin/pip install pygame moderngl numpy pybind11 cmake
 
 # Build the C++ engine
 bash compile.sh
 
 # Run
-source venv/bin/activate
-python3 main.py
+src/venv/bin/python3 src/main.py
 ```
+
+> **fish shell:** `source src/venv/bin/activate` won't work — use `source src/venv/bin/activate.fish` or just invoke `src/venv/bin/python3` directly as shown above.
 
 ## Windows
 
@@ -46,16 +46,16 @@ Install prerequisites:
 
 ```bat
 REM Create venv and install Python dependencies
-python -m venv venv
-venv\Scripts\activate
+python -m venv src\venv
+src\venv\Scripts\activate
 pip install pygame-ce moderngl numpy pybind11 cmake
 
 REM Build the C++ engine
 compile.bat
 
 REM Run
-venv\Scripts\activate
-python main.py
+src\venv\Scripts\activate
+python src\main.py
 ```
 
 [^1]:

@@ -53,8 +53,8 @@ clock = pygame.time.Clock()
 running = True
 
 pygame.font.init()
-g.font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 29)
-g.small_font = pygame.font.Font("fonts/pixelOperatorBold.ttf", 20)
+g.font = pygame.font.Font("assets/fonts/pixelOperatorBold.ttf", 29)
+g.small_font = pygame.font.Font("assets/fonts/pixelOperatorBold.ttf", 20)
 
 # UI Configuration - centralized sizing and spacing
 g.ui_config = {
