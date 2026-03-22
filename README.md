@@ -32,7 +32,11 @@ src/venv/bin/pip install pygame moderngl numpy pybind11 cmake
 bash compile.sh
 
 # Run
-src/venv/bin/python3 src/main.py
+cd src
+
+source venv/bin/activate.fish
+
+python3 main.py
 ```
 
 > **fish shell:** `source src/venv/bin/activate` won't work — use `source src/venv/bin/activate.fish` or just invoke `src/venv/bin/python3` directly as shown above.
