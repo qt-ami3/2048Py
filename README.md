@@ -5,6 +5,7 @@ With the latest changes; the moderngl version of the game should run at a playab
 ![](sample/sample0.png)
 ![](sample/sample1.png)
 ![](sample/sample2.png)
+![](sample/sample3.png)
 
 ## Prerequisites
 
