@@ -112,9 +112,9 @@ g.passive_menu_tile = None
 
 # Ability system
 g.abilities = [
-    {'name': 'Bomb', 'cost': 750, 'charges': 0, 'description': 'Destroy a tile'},
-    {'name': 'Freeze', 'cost': 500, 'charges': 0, 'description': 'Hold tile 1 turn'},
-    {'name': 'Switch', 'cost': 600, 'charges': 0, 'description': 'Move any tile'},
+    {'name': 'Bomb', 'cost': 500, 'charges': 0, 'description': 'Destroy a tile'},
+    {'name': 'Freeze', 'cost': 750, 'charges': 0, 'description': 'Hold tile 1 turn'},
+    {'name': 'Switch', 'cost': 1550, 'charges': 0, 'description': 'Move any tile'},
 ]
 g.expansion_count = 0
 g.selecting_bomb_position = False
