@@ -1,3 +1,5 @@
+0.8.22 -- Fixed cracking and performence issues with track when low-pass filter kicks in.
+
 0.8.21 -- Added music system!
 
     Not nearly as nice a patch number, but a huge leap in improving the game's atmosphere:
