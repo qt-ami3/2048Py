@@ -65,3 +65,6 @@ python src\main.py
 [^1]:
     Kudos to @SheviTGP for his help testing and improving Windows instructions.
 [^1]
+[^1]:
+    Huge thanks to merionette for composing such great music.
+[^1]

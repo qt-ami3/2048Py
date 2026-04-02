@@ -12,9 +12,11 @@ import numpy as np
 import functions as func
 import moderngl
 import game2048_engine as engine
+from audio_manager import AudioManager
 
 # pygame setup
 pygame.init()
+pygame.mixer.quit()  # free audio device for sounddevice
 
 # Game state container
 class G: pass
@@ -103,6 +105,9 @@ g.playingGrid = np.array(g.engine.get_grid_values(), dtype=int).reshape(g.rows, 
 
 # Score tracking
 g.points = g.engine.score()
+
+# Audio
+g.audio = AudioManager("assets/audio/music/2048squaredMain.mp3")
 
 # Passive tracking
 g.passive_map = {}         # {(r,c): passive_type_int}
@@ -320,6 +325,11 @@ while running:
 
     func.update_animations(g, dt)
     func.update_color_transition(g)
+
+    # Update audio effects based on board vacancy
+    total_cells = g.rows * g.cols
+    empty_cells = int(np.count_nonzero(g.playingGrid == 0))
+    g.audio.update(empty_cells / total_cells)
 
     # Draw to pygame surface (background color from current scheme)
     g.render_surface.fill(func.COLORS[0])
@@ -599,5 +609,6 @@ while running:
 
     pygame.display.flip()
 
+g.audio.stop()
 pygame.quit()
 g.ctx.release()

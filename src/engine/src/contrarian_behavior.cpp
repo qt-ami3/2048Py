@@ -28,8 +28,12 @@ void ContrarianBehavior::pre_snapshot(const Board& board, int dr, int dc) {
             pre_blocked_.insert({cr, cc});
         } else {
             const Tile& t = board.at(imm_r, imm_c);
-            if (!t.is_empty() && !has_passive(t.passive, PassiveType::CONTRARIAN))
-                pre_blocked_.insert({cr, cc});
+            if (!t.is_empty() && !has_passive(t.passive, PassiveType::CONTRARIAN)) {
+                // Only block if the adjacent tile can't be merged with.
+                // A normal tile with matching value is a valid merge target.
+                if (!t.is_numbered() || t.value != board.at(cr, cc).value)
+                    pre_blocked_.insert({cr, cc});
+            }
         }
     }
 }
