@@ -41,9 +41,11 @@ class AudioManager:
         self.block_size = block_size
         self.running = True
 
-        # Pedalboard's C++ lowpass — releases the GIL during processing
-        self._lowpass = LowpassFilter(cutoff_frequency_hz=20000.0)
-        self._board = Pedalboard([self._lowpass])
+        # Pedalboard C++ lowpass — same Butterworth response as the old
+        # Python biquad, but runs in native code and releases the GIL.
+        self._lowpass_plugin = LowpassFilter(cutoff_frequency_hz=20000.0)
+        self._board = Pedalboard([self._lowpass_plugin])
+        self._cutoff = 20000.0
 
         # Transition targets (set by game thread, read by producer)
         self.target_speed = 1.0
@@ -74,7 +76,7 @@ class AudioManager:
             samplerate=self.sample_rate,
             channels=self.channels,
             blocksize=block_size,
-            latency='high',
+            latency=0.2,
             callback=self._callback,
             dtype='float32',
         )
@@ -124,8 +126,8 @@ class AudioManager:
         if rewind > 0:
             self.position = (self.position - rewind) % self.total_samples
 
-        # Apply low-pass filter (C++, GIL released)
-        self._lowpass.cutoff_frequency_hz = self._cutoff
+        # Apply low-pass filter (C++, releases GIL)
+        self._lowpass_plugin.cutoff_frequency_hz = self._cutoff
         processed = self._board(out.T, self.sample_rate, reset=False).T
 
         # Write into ring buffer

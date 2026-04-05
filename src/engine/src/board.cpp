@@ -49,7 +49,7 @@ std::pair<int,int> Board::spawn_number(const std::set<std::pair<int,int>>& exclu
 
     std::uniform_int_distribution<int> dist(0, (int)empties.size() - 1);
     auto [r, c] = empties[dist(rng_)];
-    grid_[r][c].value = 2;
+    grid_[r][c].value = 1024;
     grid_[r][c].passive = PassiveType::NONE;
     return {r, c};
 }
