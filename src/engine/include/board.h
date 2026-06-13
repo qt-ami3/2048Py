@@ -16,6 +16,7 @@
 class Board {
 public:
     Board(int rows, int cols);
+    Board(int rows, int cols, unsigned int seed);
 
     int rows() const { return rows_; }
     int cols() const { return cols_; }

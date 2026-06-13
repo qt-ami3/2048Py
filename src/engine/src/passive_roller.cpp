@@ -12,6 +12,11 @@ PassiveRoller::PassiveRoller()
 {
 }
 
+PassiveRoller::PassiveRoller(unsigned int seed)
+    : rng_(seed)
+{
+}
+
 std::vector<PassiveCandidate> PassiveRoller::roll(
     const Board& board,
     const std::vector<MergeInfo>& merges,

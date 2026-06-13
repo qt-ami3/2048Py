@@ -37,6 +37,7 @@
 │       ├── CMakeLists.txt
 │       ├── include/           # Headers
 │       └── src/               # Implementation + pybind11 bindings
+├── tests/                     # Engine test harness (pytest, headless)
 └── docs/                      # This documentation
 ```
 

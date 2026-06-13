@@ -25,13 +25,16 @@ The engine lives in `src/engine/` and is compiled to `game2048_engine*.so` via p
 
 **File**: `game_engine.h` / `game_engine.cpp`
 
-### Constructor
+### Constructors
 
 ```cpp
-GameEngine(int rows, int cols)
+GameEngine(int rows, int cols)                     // random seed
+GameEngine(int rows, int cols, unsigned int seed)  // deterministic
 ```
 
 Initializes the board, registers behaviors (SlowBehavior then ContrarianBehavior), spawns 2 starting tiles. Initial score is 4500, initial `tar_expand` is 2048.
+
+The seeded variant derives all RNGs (board spawns, passive rolls, snail movement) from one seed: same seed + same call sequence = identical runs. The test harness (`tests/`) is built on it.
 
 ### Core Method
 
@@ -156,15 +159,16 @@ struct MoveResult {
 
 ### Bomb Mechanics
 
-- A bomb tile (-1) destroys the next tile in the compaction direction.
-- The bomb itself survives unless it is the last tile in a segment.
-- Destroyed positions are logged in `bomb_destroyed`.
+- A bomb tile (-1) destroys the next tile in the compaction direction; the bomb is consumed with it.
+- A bomb that is last in its segment (nothing to hit) slides like a normal tile.
+- Destroyed positions are logged in `bomb_destroyed` (the landing cell).
 
 ### Merging Rules
 
 - Two tiles of equal value merge into a doubled tile.
-- The merged tile inherits any passive from either source (OR of bitmasks).
+- The merged tile carries the **OR of both sources' passives** (`combine_passives` in `passive.h`). This rule applies in every merge path engine-wide: segment merges, behind-merges, contrarian merges, slow-mover arrivals, and frozen-slow-mover merges.
 - Multiple merges per segment are allowed (e.g., `2 2 2 2` → `4 4` → `8`).
+- Every merge awards its doubled value as points, regardless of which phase performs it.
 
 ---
 
@@ -222,7 +226,7 @@ behaviors_.push_back(std::make_unique<ContrarianBehavior>());
 Handles tiles with **pure A_LITTLE_SLOW** (no CONTRARIAN bit).
 
 **Behavior during `advance()`**:
-1. **Behind-merge**: A regular tile may have compacted next to a frozen slow tile during the regular move phase — merge it now.
+1. **Behind-merge**: A regular tile may have compacted next to a frozen slow tile during the regular move phase — merge it now. (If the absorbed tile carried CONTRARIAN, the merged tile changes owner and stays put until next turn.)
 2. **Scan ahead**: Find ultimate destination (empty cells, then first non-slow numbered tile).
 3. **Move 1 cell**: If destination is 1 cell away and enables a merge, do it immediately. Otherwise create a `SlowMoverState` for remainder of travel.
 4. **Cascade fill**: Regular tiles slide into the vacated cell.
@@ -273,11 +277,12 @@ Created by behavior `advance()` when a tile has more than 1 cell to travel. Cons
 
 **File**: `passive_roller.h` / `passive_roller.cpp`
 
-After each turn's merges, `PassiveRoller::roll()` evaluates each merged tile:
+After each turn, `PassiveRoller::roll()` rolls once per merge:
 
-- **Probability** = `merge_value % 100` (e.g., 512 → 51%, 1024 → 24%, 2048 → 48%)
-- Returns a list of `PassiveCandidate` structs for tiles that win the roll.
-- Python displays a selection menu for each candidate.
+- **Chance** = `merge_value × 0.1%` (e.g., 512 → 51.2%; values ≥ 1000 add guaranteed successes plus a roll on the remainder).
+- On success, one **random eligible tile** becomes the `PassiveCandidate` — eligible means numbered, passive-free, and not a merge destination, the spawned tile, a slow mover, or a snail.
+- At most one candidate per turn: rolling stops at the first success.
+- Python displays a selection menu for the candidate.
 
 ---
 
@@ -306,6 +311,8 @@ struct TurnResult {
     std::vector<MergeInfo>          slow_tile_merges;
 };
 ```
+
+`points_gained` sums every merge channel: `merges`, `slow_tile_merges`, and `slow_mover_updates` entries with `is_merge` set.
 
 ---
 

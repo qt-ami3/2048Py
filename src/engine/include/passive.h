@@ -20,5 +20,10 @@ inline bool has_passive(PassiveType stored, PassiveType flag) {
     return (static_cast<int>(stored) & static_cast<int>(flag)) != 0;
 }
 
+// Merge rule: a merged tile carries the OR of both source tiles' passives.
+inline PassiveType combine_passives(PassiveType a, PassiveType b) {
+    return static_cast<PassiveType>(static_cast<int>(a) | static_cast<int>(b));
+}
+
 std::string passive_name(PassiveType type);
 std::string passive_description(PassiveType type);

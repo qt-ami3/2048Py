@@ -40,10 +40,11 @@ g.is_fullscreen = True
 # Create display based on initial mode with OpenGL support
 if g.is_fullscreen:
     g.screen = pygame.display.set_mode((g.NATIVE_WIDTH, g.NATIVE_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
-    g.display_width, g.display_height = g.NATIVE_WIDTH, g.NATIVE_HEIGHT
 else:
     g.screen = pygame.display.set_mode((g.WINDOW_WIDTH, g.WINDOW_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
-    g.display_width, g.display_height = g.WINDOW_WIDTH, g.WINDOW_HEIGHT
+# Mouse events arrive in the window SDL actually created, which can differ from
+# the requested mode (e.g. Wayland/XWayland never switches video modes).
+g.display_width, g.display_height = pygame.display.get_window_size()
 
 # Initialize ModernGL
 g.ctx = moderngl.create_context()

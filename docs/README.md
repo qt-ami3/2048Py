@@ -8,3 +8,4 @@
 | [game-systems.md](game-systems.md) | Passives, abilities, shop, snails, walls, scoring |
 | [audio.md](audio.md) | Audio system — pedalboard effects, ring buffer, tuning |
 | [extending.md](extending.md) | How to add new passives, abilities, or modify rules |
+| [testing.md](testing.md) | Test harness — determinism, invariant fuzzing, interaction tests |

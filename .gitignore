@@ -1,0 +1,5 @@
+build/
+src/*.so
+src/venv/
+__pycache__/
+.pytest_cache/

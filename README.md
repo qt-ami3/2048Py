@@ -13,7 +13,7 @@ With the latest changes; the moderngl version of the game should run at a playab
 - A C++ compiler (g++ on Linux, MSVC on Windows)
 - CMake
 
-Make sure you update the `NATIVE_WIDTH` & `NATIVE_HEIGHT` variables in `src/main.py` to match your native resolution.
+Optionally set the `NATIVE_WIDTH` & `NATIVE_HEIGHT` variables in `src/main.py` to your native resolution — they choose the requested fullscreen mode. Mouse input adapts to whatever window the system actually creates, so this is not required for the game to work.
 
 ## Linux
 
@@ -40,6 +40,17 @@ python3 main.py
 ```
 
 > **fish shell:** `source src/venv/bin/activate` won't work — use `source src/venv/bin/activate.fish` or just invoke `src/venv/bin/python3` directly as shown above.
+
+## Engine tests
+
+The C++ engine has a headless pytest harness (determinism, invariant fuzzing, feature-interaction regression tests):
+
+```bash
+src/venv/bin/pip install pytest
+src/venv/bin/python3 -m pytest tests/ -q
+```
+
+Tests marked `xfail` document known engine bugs; they flip to a loud failure once the bug is fixed.
 
 ## Windows
 

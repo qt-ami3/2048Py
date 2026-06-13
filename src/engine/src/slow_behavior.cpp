@@ -45,12 +45,18 @@ bool SlowBehavior::advance(MoveContext& ctx, TurnResult& result) {
             int new_value = tile_value * 2;
             result.slow_tile_moves.push_back({behind_r, behind_c, sr, sc, tile_value});
             result.slow_tile_merges.push_back({sr, sc, new_value});
+            board.at(sr, sc).passive = combine_passives(board.at(sr, sc).passive,
+                                                        board.at(behind_r, behind_c).passive);
             board.at(behind_r, behind_c).value = 0;
             board.at(behind_r, behind_c).passive = PassiveType::NONE;
             board.at(sr, sc).value = new_value;
             tile_value = new_value;
             changed = true;
         }
+
+        // The merge may have absorbed a CONTRARIAN bit; if ownership changed,
+        // leave the tile in place — it acts as its new type from next turn.
+        if (!matches(board.at(sr, sc).passive)) continue;
 
         if (ctx.frozen_tiles.count({sr, sc})) continue;
 
@@ -93,7 +99,8 @@ bool SlowBehavior::advance(MoveContext& ctx, TurnResult& result) {
             board.at(sr, sc).value = 0;
             board.at(sr, sc).passive = PassiveType::NONE;
             board.at(dest_r, dest_c).value = new_value;
-            board.at(dest_r, dest_c).passive = sr_passive;
+            board.at(dest_r, dest_c).passive = combine_passives(sr_passive,
+                                                                board.at(dest_r, dest_c).passive);
             result.slow_tile_moves.push_back({sr, sc, dest_r, dest_c, tile_value});
             result.slow_tile_merges.push_back({dest_r, dest_c, new_value});
             changed = true;
@@ -137,10 +144,15 @@ bool SlowBehavior::advance(MoveContext& ctx, TurnResult& result) {
 
         int old_adj_value = board.at(adj_r, adj_c).value;
         int new_value = sm.value * 2;
+        PassiveType merged_passive = combine_passives(
+            board.at(sm.current_row, sm.current_col).passive,
+            board.at(adj_r, adj_c).passive);
         board.at(adj_r, adj_c).value = 0;
         board.at(adj_r, adj_c).passive = PassiveType::NONE;
         sm.value = new_value;
+        sm.passive = merged_passive;  // keeps future steps carrying the combined bits
         board.at(sm.current_row, sm.current_col).value = new_value;
+        board.at(sm.current_row, sm.current_col).passive = merged_passive;
 
         // These go into main animation channels since they animate in phase 1.
         result.moves.push_back({adj_r, adj_c, sm.current_row, sm.current_col, old_adj_value});

@@ -85,12 +85,8 @@ std::vector<TileEntry> process_segment_left(
         } else if (j < (int)tiles.size() - 1 && value == tiles[j+1].value && value > 0) {
             // Merge with next tile
             int new_value = value * 2;
-            // Passive inheritance: keep passive from either tile
-            PassiveType merged_passive = PassiveType::NONE;
-            if (passive != PassiveType::NONE)
-                merged_passive = passive;
-            else if (tiles[j+1].passive != PassiveType::NONE)
-                merged_passive = tiles[j+1].passive;
+            // Passive inheritance: merged tile carries both tiles' passives
+            PassiveType merged_passive = combine_passives(passive, tiles[j+1].passive);
             new_vals.push_back({new_value, target, merged_passive});
             if (orig != target)
                 moves.push_back({row_idx, orig, row_idx, target, value});
@@ -150,11 +146,7 @@ std::vector<TileEntry> process_segment_right(
             j -= 2;
         } else if (j > 0 && value == tiles[j-1].value && value > 0) {
             int new_value = value * 2;
-            PassiveType merged_passive = PassiveType::NONE;
-            if (passive != PassiveType::NONE)
-                merged_passive = passive;
-            else if (tiles[j-1].passive != PassiveType::NONE)
-                merged_passive = tiles[j-1].passive;
+            PassiveType merged_passive = combine_passives(passive, tiles[j-1].passive);
             new_vals.insert(new_vals.begin(), {new_value, target, merged_passive});
             if (orig != target)
                 moves.push_back({row_idx, orig, row_idx, target, value});
@@ -215,11 +207,7 @@ std::vector<TileEntry> process_segment_up(
             i += 2;
         } else if (i < (int)tiles.size() - 1 && value == tiles[i+1].value && value > 0) {
             int new_value = value * 2;
-            PassiveType merged_passive = PassiveType::NONE;
-            if (passive != PassiveType::NONE)
-                merged_passive = passive;
-            else if (tiles[i+1].passive != PassiveType::NONE)
-                merged_passive = tiles[i+1].passive;
+            PassiveType merged_passive = combine_passives(passive, tiles[i+1].passive);
             new_vals.push_back({new_value, target, merged_passive});
             if (orig != target)
                 moves.push_back({orig, col_idx, target, col_idx, value});
@@ -278,11 +266,7 @@ std::vector<TileEntry> process_segment_down(
             i -= 2;
         } else if (i > 0 && value == tiles[i-1].value && value > 0) {
             int new_value = value * 2;
-            PassiveType merged_passive = PassiveType::NONE;
-            if (passive != PassiveType::NONE)
-                merged_passive = passive;
-            else if (tiles[i-1].passive != PassiveType::NONE)
-                merged_passive = tiles[i-1].passive;
+            PassiveType merged_passive = combine_passives(passive, tiles[i-1].passive);
             new_vals.insert(new_vals.begin(), {new_value, target, merged_passive});
             if (orig != target)
                 moves.push_back({orig, col_idx, target, col_idx, value});

@@ -108,6 +108,12 @@ def draw_passive_indicator(g, r, c):
     # ...
 ```
 
+### What you get for free
+
+- **Passive inheritance**: every merge path combines passives with `combine_passives` (bitwise OR), so your flag survives and stacks through merges without extra code.
+- **Scoring**: merges your behavior records in `result.slow_tile_merges` (and slow-mover merge updates) are counted into `points_gained` automatically.
+- **Tests**: add interaction-pair tests in `tests/test_interactions.py` and run the fuzzer (`tests/test_fuzz_invariants.py`) — see [testing.md](testing.md).
+
 ---
 
 ## Adding a New Ability
@@ -195,6 +201,6 @@ To change bomb behavior, modify the bomb check inside the segment processor.
 
 ## Changing Expansion Behavior
 
-Board expansion is triggered when `g.engine.score() >= g.engine.tar_expand()`. The direction of expansion is chosen in `start_grid_expansion(g)` in `functions.py` (currently cycles or picks based on board state). To change the direction logic, edit that function.
+Board expansion is triggered when a merge produces a tile of value `tar_expand()` (any merge phase counts). The direction of expansion is chosen in `start_grid_expansion(g)` in `functions.py` (currently cycles or picks based on board state). To change the direction logic, edit that function.
 
 `g.engine.complete_expansion(direction)` (C++) calls `board_.expand(direction)`, then updates all slow mover and snail positions to account for the shifted indices.

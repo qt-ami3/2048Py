@@ -17,12 +17,14 @@ The frontend is split between two files:
 2. A high-resolution offscreen surface (`render_surface`, 3840×2400) is created for Pygame drawing.
 3. A fullscreen OpenGL quad renders that surface through the CRT shader each frame.
 
-**Resolution config** — set these in `main.py` to match your display:
+**Resolution config** — `NATIVE_WIDTH`/`NATIVE_HEIGHT` in `main.py` set the *requested* fullscreen mode:
 
 ```python
-NATIVE_WIDTH  = 2560   # Your screen width
-NATIVE_HEIGHT = 1600   # Your screen height
+NATIVE_WIDTH  = 1920
+NATIVE_HEIGHT = 1200
 ```
+
+The window SDL actually creates can differ (Wayland/XWayland never switch video modes), so after `set_mode` the code reads `pygame.display.get_window_size()` into `g.display_width/height` — mouse events arrive in that space, and all click hit-testing scales through it. Matching `NATIVE_*` to your display is cosmetic, not required for input.
 
 ### Game State (`G()`)
 

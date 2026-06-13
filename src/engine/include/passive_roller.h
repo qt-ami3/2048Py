@@ -20,6 +20,7 @@ struct PassiveCandidate {
 class PassiveRoller {
 public:
     PassiveRoller();
+    explicit PassiveRoller(unsigned int seed);
 
     // Roll for passive triggers based on merge results.
     // excluded_positions = merge destinations + spawned tile + slow mover positions

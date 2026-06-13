@@ -57,7 +57,8 @@ PYBIND11_MODULE(game2048_engine, m) {
         .def_readonly("new_row", &SlowMoverUpdate::new_row)
         .def_readonly("new_col", &SlowMoverUpdate::new_col)
         .def_readonly("value", &SlowMoverUpdate::value)
-        .def_readonly("finished", &SlowMoverUpdate::finished);
+        .def_readonly("finished", &SlowMoverUpdate::finished)
+        .def_readonly("is_merge", &SlowMoverUpdate::is_merge);
 
     // SlowMoverState
     py::class_<SlowMoverState>(m, "SlowMoverState")
@@ -101,6 +102,7 @@ PYBIND11_MODULE(game2048_engine, m) {
     // GameEngine
     py::class_<GameEngine>(m, "GameEngine")
         .def(py::init<int, int>())
+        .def(py::init<int, int, unsigned int>(), py::arg("rows"), py::arg("cols"), py::arg("seed"))
         .def("process_move", &GameEngine::process_move)
         .def("set_tile", &GameEngine::set_tile, py::arg("row"), py::arg("col"), py::arg("value"), py::arg("passive_type") = 0)
         .def("assign_passive", &GameEngine::assign_passive)

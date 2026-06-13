@@ -97,7 +97,8 @@ bool ContrarianBehavior::advance(MoveContext& ctx, TurnResult& result) {
             board.at(cr, cc).value = 0;
             board.at(cr, cc).passive = PassiveType::NONE;
             board.at(dest_r, dest_c).value = new_value;
-            board.at(dest_r, dest_c).passive = tile_passive;
+            board.at(dest_r, dest_c).passive = combine_passives(tile_passive,
+                                                                board.at(dest_r, dest_c).passive);
             result.slow_tile_moves.push_back({cr, cc, dest_r, dest_c, tile_value});
             result.slow_tile_merges.push_back({dest_r, dest_c, new_value});
         } else {

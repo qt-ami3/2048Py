@@ -10,10 +10,16 @@
 #include <algorithm>
 
 GameEngine::GameEngine(int rows, int cols)
-    : board_(rows, cols),
+    : GameEngine(rows, cols, std::random_device{}())
+{
+}
+
+GameEngine::GameEngine(int rows, int cols, unsigned int seed)
+    : board_(rows, cols, seed),
       score_(4500),
       tar_expand_(2048),
-      rng_(std::random_device{}())
+      passive_roller_(seed + 1),
+      rng_(seed + 2)
 {
     // Register passive behaviors in advance-phase order.
     // To add a new passive: implement TileBehavior, add one line here.
@@ -147,15 +153,23 @@ TurnResult GameEngine::process_move(const std::string& direction) {
             cascade_fill_behind(vr, vc, move_dr, move_dc, active_sm_positions, result.slow_tile_moves);
 
     result.board_changed = true;
-    result.moves   = move_result.moves;
-    result.merges  = move_result.merges;
+    // Prepend rather than assign: behaviors may already have pushed entries
+    // (e.g. the frozen-slow-mover merge) that must survive into the result.
+    result.moves.insert(result.moves.begin(),
+                        move_result.moves.begin(), move_result.moves.end());
+    result.merges.insert(result.merges.begin(),
+                         move_result.merges.begin(), move_result.merges.end());
     result.bomb_destroyed.insert(move_result.bomb_destroyed.begin(),
                                   move_result.bomb_destroyed.end());
 
     frozen_tiles_.clear();
 
+    // Every merge of numbered tiles scores, regardless of which phase made it.
     result.points_gained = 0;
-    for (const auto& m : result.merges) result.points_gained += m.new_value;
+    for (const auto& m : result.merges)           result.points_gained += m.new_value;
+    for (const auto& m : result.slow_tile_merges) result.points_gained += m.new_value;
+    for (const auto& u : result.slow_mover_updates)
+        if (u.is_merge) result.points_gained += u.value;
     score_ += result.points_gained;
 
     std::set<std::pair<int,int>> excluded;
@@ -333,7 +347,8 @@ std::vector<SlowMoverUpdate> GameEngine::advance_slow_movers() {
                 board_.at(sm.current_row, sm.current_col).value = 0;
                 board_.at(sm.current_row, sm.current_col).passive = PassiveType::NONE;
                 board_.at(next_r, next_c).value = new_value;
-                board_.at(next_r, next_c).passive = sm.passive;
+                board_.at(next_r, next_c).passive = combine_passives(sm.passive,
+                                                                     board_.at(next_r, next_c).passive);
                 sm.active = false;
                 updates.push_back({sm.current_row, sm.current_col,
                                    next_r, next_c, new_value, true, true});

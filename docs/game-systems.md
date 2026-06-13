@@ -13,14 +13,16 @@ Passives are bitmask flags assigned to numbered tiles. A tile can hold multiple 
 | `CONTRARIAN` | 2 | Tile moves in the direction opposite to the player's input |
 | Slow Contrarian | 3 | Both flags set; moves 1 cell/turn in the opposite direction |
 
+A merged tile carries the **OR of both source tiles' passives**, in every merge path (regular compaction, behind-merges, contrarian merges, slow-mover arrivals). Merging a Slow tile with a Contrarian tile is how Slow Contrarian arises — the passive menu only ever targets passive-free tiles.
+
 ### How Passives Are Assigned
 
-After each turn's merges, `PassiveRoller::roll()` evaluates each merged tile:
+After each turn, `PassiveRoller::roll()` rolls once per merge:
 
-- **Roll chance** = `merge_value % 100` (e.g., 512 → 51%, 1024 → 24%, 4096 → 96%)
-- Winning tiles become `PassiveCandidate` entries in `TurnResult.passive_candidates`
-- Python queues these and shows a selection menu overlay after animations complete
-- The player picks one passive per candidate tile from the menu
+- **Roll chance** = `merge_value × 0.1%` (e.g., 512 → 51.2%; values ≥ 1000 grant a guaranteed success plus a roll on the remainder)
+- On success, a **random eligible tile** becomes the `PassiveCandidate` — eligible means numbered, passive-free, and not a merge destination, the spawned tile, a slow mover, or a snail
+- At most one candidate per turn: rolling stops at the first success
+- Python queues candidates and shows a selection menu overlay after animations complete; the player picks one passive for the candidate tile
 
 ### Passive Indicator (Visual)
 
@@ -56,9 +58,9 @@ When a slow tile moves:
 
 | Ability | Index | Base Cost | Description |
 |---------|-------|-----------|-------------|
-| Bomb | 0 | 750 pts | Place a bomb tile; destroys an adjacent tile when it moves |
-| Freeze | 1 | 500 pts | Lock a tile in place for one turn |
-| Switch | 2 | 600 pts | Swap two tiles (animated fade) |
+| Bomb | 0 | 500 pts | Place a bomb tile; destroys an adjacent tile when it moves |
+| Freeze | 1 | 750 pts | Lock a tile in place for one turn |
+| Switch | 2 | 1550 pts | Swap two tiles (animated fade) |
 
 Abilities are defined in `g.abilities` as a list of dicts `{name, cost, charges, description}`.
 
@@ -75,8 +77,8 @@ Abilities are defined in `g.abilities` as a list of dicts `{name, cost, charges,
 ### Bomb Mechanics
 
 - Placed on an empty cell; value = -1.
-- During movement, a bomb destroys the first tile it collides with in the slide direction.
-- The bomb itself survives the collision (unless it is the last tile in a segment and there is nothing to hit).
+- During movement, a bomb destroys the first tile it collides with in the slide direction; **the bomb is consumed with it** at the landing cell.
+- A bomb with nothing to hit (last in its segment) just slides like a normal tile.
 - Destruction creates a particle explosion.
 - **Two detonation windows per turn** (pre-movement and post-movement) cover bombs adjacent to frozen tiles.
 
@@ -85,7 +87,7 @@ Abilities are defined in `g.abilities` as a list of dicts `{name, cost, charges,
 - A frozen tile is immovable for one full turn.
 - Frozen tiles are stored in `g.frozen_tiles` (Python) and passed to `g.engine.place_freeze(r, c)`.
 - Frozen tiles show a visual overlay (semi-transparent blue).
-- Freeze is **cleared automatically** after the turn (`g.engine.clear_freeze(r, c)` called in `process_move`).
+- Freeze is **cleared automatically** after a valid turn: the engine clears its frozen set inside `process_move` (C++), and Python clears its overlay set `g.frozen_tiles` in `func.process_move`. Invalid turns leave freezes in place.
 
 ---
 
@@ -112,7 +114,7 @@ Prices increase with each board expansion:
 
 ## Board Expansion
 
-The board grows when `g.engine.tar_expand` is reached (based on score milestones: 2048, 4096, 8192, …).
+The board grows when a merge **produces a tile equal to `tar_expand`** (2048, 4096, 8192, … — doubles after each expansion). Merges from any phase count: regular, behavior-phase, and slow-mover arrivals.
 
 1. `TurnResult.should_expand` is `True`.
 2. Python calls `start_grid_expansion(g)`, which determines the expand direction and calls `g.engine.complete_expansion(direction)`.
@@ -147,9 +149,9 @@ Wall tiles (value = -3) are permanent obstacles:
 ## Scoring
 
 - Points accumulate from merges: merging two tiles of value `n` grants `2n` points.
+- **Every merge scores**, whichever phase performs it — regular compaction, slow/contrarian behavior merges, and slow-mover arrival merges all contribute to `points_gained`.
 - Starting score: **4500**.
-- Score determines ability shop access and expansion triggers.
-- `minimumPoints.txt` stores a high-score reference.
+- Points are spent in the ability shop.
 
 ---
 

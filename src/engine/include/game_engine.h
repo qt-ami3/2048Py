@@ -18,6 +18,9 @@
 class GameEngine {
 public:
     GameEngine(int rows, int cols);
+    // Deterministic variant: seeds all RNGs (engine, board spawns, passive rolls).
+    // Same seed + same call sequence = identical runs. Used by the test harness.
+    GameEngine(int rows, int cols, unsigned int seed);
 
     TurnResult process_move(const std::string& direction);
 
